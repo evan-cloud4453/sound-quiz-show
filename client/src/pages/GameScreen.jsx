@@ -60,7 +60,6 @@ export default function GameScreen() {
     isTimerRunning
   } = state
 
-  // 🍎 [애플 권한 탈취용 핵심 상태]
   const [soundUnlocked, setSoundUnlocked] = useState(false)
   const isUnlockingRef = useRef(false)
   const isPlayingRef = useRef(false)
@@ -85,10 +84,8 @@ export default function GameScreen() {
   const audioStopTimerRef = useRef(null)
   const tickTimersRef = useRef([])
 
-  // 💡 [이벤트 핸들러 최신 상태 참조용 레퍼런스]
   const stateChangeHandlerRef = useRef()
 
-  // 째깍 사운드 신디사이저
   const playTickSound = useCallback(() => {
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext
@@ -114,25 +111,24 @@ export default function GameScreen() {
     tickTimersRef.current = []
   }, [])
 
-  // 🍎 1단계: 플레이어 최초 입장 시 더미(빈) 플레이어를 미리 깔아둠 (Persistent Player)
   useEffect(() => {
     let cancelled = false;
     loadYouTubeApi().then(YT => {
       if (cancelled) return;
       playerRef.current = new YT.Player(playerHostIdRef.current, {
         width: 220, height: 200,
-        videoId: 'jNQXAC9IVRw', // 더미 영상 (코끼리 영상)
+        videoId: 'jNQXAC9IVRw', 
         playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, playsinline: 1, rel: 0 },
         events: {
           onReady: () => setMediaLoaded(true),
           onStateChange: (event) => stateChangeHandlerRef.current?.(event),
           onError: () => {
-            if (isUnlockingRef.current) return; // 권한 탈취 중 에러는 자연스럽게 무시
+            if (isUnlockingRef.current) return; 
             clearTimeout(failSafeTimerRef.current);
             clearTimeout(audioStopTimerRef.current);
             clearTickTimers();
             setIsPlaying(false);
-            emit('skip_round');
+            emit('skip_round'); // 조용히 스킵 신호만 보냄
           }
         }
       });
@@ -140,12 +136,10 @@ export default function GameScreen() {
     return () => { cancelled = true; playerRef.current?.destroy?.(); }
   }, [emit, clearTickTimers]);
 
-  // 🍎 2단계: 터치 유도 및 권한 강제 탈취 핸들러
   const handleUnlock = () => {
     setSoundUnlocked(true);
     isUnlockingRef.current = true;
 
-    // Web Audio API 잠금 해제 (묵음 출력)
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (AudioContext) {
@@ -161,15 +155,12 @@ export default function GameScreen() {
       }
     } catch(e) {}
 
-    // YouTube IFrame 권한 해제 (터치 이벤트 내에서 강제 play 호출)
     if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
       playerRef.current.playVideo();
     }
   };
 
-  // 🍎 3단계: 상태 감지 및 서버 전송 (Ref를 통해 최신 함수 유지)
   stateChangeHandlerRef.current = (event) => {
-    // 권한 탈취용 더미 재생이었다면 즉시 멈추고 입 싹 닦기!
     if (isUnlockingRef.current && event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
       try { playerRef.current?.pauseVideo?.(); } catch(e){}
       isUnlockingRef.current = false;
@@ -206,7 +197,6 @@ export default function GameScreen() {
     }
   };
 
-  // 🍎 4단계: 진짜 라운드 시작 로직 (soundUnlocked가 true일 때만 가동)
   useEffect(() => {
     if (!roundActive || !soundUnlocked) return;
 
@@ -218,7 +208,7 @@ export default function GameScreen() {
     setFlashWrong(false);
     setIsPlaying(false);
     isPlayingRef.current = false;
-    isUnlockingRef.current = false; // 혹시 꼬인 락 초기화
+    isUnlockingRef.current = false; 
     setTimerActive(false);
     setShowResult(false);
     setPlaybackBlocked(false);
@@ -230,20 +220,19 @@ export default function GameScreen() {
     clearTickTimers();
 
     if (!youtubeId) {
-      emit('skip_round'); // ID 없으면 다이렉트 스킵
+      emit('skip_round');
       return;
     }
 
     failSafeTimerRef.current = setTimeout(() => {
       setIsPlaying(false);
       setTimerActive(false);
-      emit('skip_round');
+      emit('skip_round'); // 10초 무한 로딩 시 조용히 스킵 신호 발송
     }, 10000);
 
     const startSeconds = Number(youtubeStart) || 0;
     const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
 
-    // 💡 이미 만들어둔 플레이어에 진짜 영상을 덮어씌우고 재생!
     if (playerRef.current?.loadVideoById) {
       playerRef.current.loadVideoById({ videoId: youtubeId, startSeconds, endSeconds });
       setTimeout(() => {
@@ -313,7 +302,6 @@ export default function GameScreen() {
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
 
-      {/* 🍎 애플(iOS) 권한 강제 탈취용 오버레이 게이트 */}
       {!soundUnlocked && (
         <div style={{
           position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
@@ -346,9 +334,7 @@ export default function GameScreen() {
           {lastResult.noWinner && (
             <div className="result-banner timeout animate-scaleIn">
               <div className="result-icon">⏰</div>
-              <div className="result-text">
-                {lastResult.message?.includes('스킵') ? '재생 오류 스킵!' : '시간 초과!'}
-              </div>
+              <div className="result-text">시간 초과!</div>
               <div className="result-answer">정답: {lastResult.answer}</div>
               <div className="result-sub">{lastResult.message || '아무도 점수를 얻지 못했습니다 (0점)'}</div>
             </div>
@@ -415,9 +401,8 @@ export default function GameScreen() {
                     <span>사운드 로딩 중...</span>
                   </div>
                 )}
-                {/* 💡 마개조 완수로 인해 더 이상 못생긴 수동 재생 버튼은 필요 없습니다! */}
                 {playbackError && (
-                  <div className="audio-error">YouTube 영상을 재생할 수 없습니다.</div>
+                  <div className="audio-error">영상을 재생할 수 없습니다.</div>
                 )}
                 <div className="phase-label">{phaseLabel}</div>
               </div>
