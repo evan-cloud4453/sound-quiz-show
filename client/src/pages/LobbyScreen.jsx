@@ -1,3 +1,4 @@
+// client/src/pages/LobbyScreen.jsx
 import React, { useState } from 'react'
 import { useGame } from '../utils/GameContext'
 import './LobbyScreen.css'
@@ -12,7 +13,8 @@ function getAvatar(id) {
 
 export default function LobbyScreen() {
   const { state, startGame, backToTitle } = useGame()
-  const { roomCode, players, isHost, hostId, myId, nickname } = state
+  // 💡 기존의 고정된 isHost는 빼버리고 최신 상태를 직접 계산합니다.
+  const { roomCode, players, hostId, myId, nickname } = state
   const [targetScore, setTargetScore] = useState(5)
   const [copied, setCopied] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -31,7 +33,11 @@ export default function LobbyScreen() {
     setStarting(false)
   }
 
+  // 내 정보 찾기
   const me = players.find(p => p.id === myId) || players.find(p => p.nickname === nickname)
+  
+  // 🚨 [핵심 버그 수정] 서버가 갱신해주는 실시간 '진짜' 방장 여부 판별!
+  const currentIsHost = me?.isHost || me?.id === hostId
 
   return (
     <div className="lobby-screen">
@@ -98,7 +104,7 @@ export default function LobbyScreen() {
           </div>
 
           {/* Game settings (host only) */}
-          {isHost && (
+          {currentIsHost && (
             <div className="glass-panel settings-panel animate-fadeInUp" style={{ animationDelay: '0.2s' }}>
               <div className="panel-title">⚙️ 게임 설정</div>
 
@@ -126,7 +132,7 @@ export default function LobbyScreen() {
           )}
 
           {/* Non-host waiting message */}
-          {!isHost && (
+          {!currentIsHost && (
             <div className="glass-panel waiting-panel animate-fadeInUp" style={{ animationDelay: '0.2s' }}>
               <div className="waiting-icon">🛸</div>
               <p className="waiting-text">방장이 게임을 시작할 때까지<br />기다려주세요!</p>
@@ -137,7 +143,7 @@ export default function LobbyScreen() {
           )}
 
           {/* Start button (host only) */}
-          {isHost && (
+          {currentIsHost && (
             <button
               className={`btn btn-primary btn-lg start-btn animate-fadeInUp ${starting ? 'starting' : ''}`}
               style={{ animationDelay: '0.3s' }}
