@@ -134,7 +134,7 @@ io.on('connection', (socket) => {
           questions: [],
           roundTimer: null,
           hintTimer: null,
-          loadingTimeoutTimer: null, // 💡 서버 전용 물리 백업 타이머 레퍼런스
+          loadingTimeoutTimer: null,
           answeredThisRound: false,
           firstCorrectPlayerId: null,
           isStarting: false
@@ -253,20 +253,19 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── skip_round (멀티 레이스 컨디션 방어락 적용) ─────────────────
+  // ── skip_round (멀티탭 팀킬 방어락 적용) ─────────────────
   socket.on('skip_round', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.status !== 'PLAYING') return;
 
-      // 🚨 [방어막] 이미 다른 플레이어의 스킵 신호로 처리가 완료되었다면 즉시 차단! (무한정지 완벽 해결)
-      if (room.answeredThisRound) return;
+      // 🚨 [가장 치명적이었던 버그 해결]
+      // 다른 접속자(백그라운드 탭 등)가 재생 실패로 스킵 신호를 보내더라도,
+      // 이미 누군가 재생에 성공해서 타이머가 가동 중이라면 스킵 신호를 철저히 무시합니다! (정상 게임 보호)
+      if (room.answeredThisRound || room.roundTimer) return;
+
       room.answeredThisRound = true;
 
-      if (room.roundTimer) {
-        clearTimeout(room.roundTimer);
-        room.roundTimer = null;
-      }
       if (room.hintTimer) {
         clearTimeout(room.hintTimer);
         room.hintTimer = null;
@@ -276,15 +275,8 @@ io.on('connection', (socket) => {
         room.loadingTimeoutTimer = null;
       }
 
-      io.to(room.code).emit('answer_result', {
-        correct: false,
-        noWinner: true,
-        answer: room.questions[room.currentRound - 1]?.answers[0] || '알 수 없음',
-        message: '영상을 재생할 수 없어 스킵했습니다.',
-        scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-      });
-
-      setTimeout(() => checkEndOrNextRound(room), 2500);
+      // 디렉터님의 요청대로 안내 문구 없이 조용하고 빠르게 다음 문제로 패스!
+      checkEndOrNextRound(room);
     } catch (e) {
       console.error("Skip Round Error:", e);
     }
@@ -314,7 +306,7 @@ io.on('connection', (socket) => {
         }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000); 
       }
 
-      // 💡 0초 정지 무한 대기를 뚫어내는 무적의 타임아웃 예외 쉴드
+      // 타이머 정상 출발
       room.roundTimer = setTimeout(() => {
         try {
           room.hintTimer = null;
@@ -342,6 +334,7 @@ io.on('connection', (socket) => {
         }
       }, ROUND_TIME_LIMIT * 1000);
 
+      // 타이머 작동 상태를 전 클라이언트에 즉시 동기화
       io.to(room.code).emit('room_update', getRoomState(room));
     } catch (e) {
       console.error("Youtube Playing Error:", e);
@@ -411,23 +404,12 @@ function startRound(room) {
 
     io.to(room.code).emit('room_update', getRoomState(room));
 
-    // 🚨 [무적의 서버 자체 독립 타이머 구축]
-    // 12초 동안 그 어떤 참가자도 재생 신호를 보내지 못하면 영상 폭파(재생 불가)로 단정 짓고 
-    // 서버가 알아서 다음 라운드로 다이렉트 강제 패스 진행! (클라이언트 마비 차단책)
+    // 🚨 12초 동안 "아무도" 플레이에 성공하지 못하면, 불량 영상으로 판단해 조용히 다음으로 스킵!
     room.loadingTimeoutTimer = setTimeout(() => {
       try {
         if (room.status === 'PLAYING' && !room.roundTimer && !room.answeredThisRound) {
           room.answeredThisRound = true;
-          
-          io.to(room.code).emit('answer_result', {
-            correct: false,
-            noWinner: true,
-            answer: question?.answers?.[0] || '알 수 없음',
-            message: '음원 재생 지연으로 라운드를 스킵합니다.',
-            scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-          });
-
-          setTimeout(() => checkEndOrNextRound(room), 2500);
+          checkEndOrNextRound(room);
         }
       } catch (e) {
         console.error("서버 독립 백업 스케줄러 에러 복구:", e);
