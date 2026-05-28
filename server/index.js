@@ -253,15 +253,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── skip_round (멀티탭 팀킬 방어락 적용) ─────────────────
   socket.on('skip_round', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.status !== 'PLAYING') return;
 
-      // 🚨 [가장 치명적이었던 버그 해결]
-      // 다른 접속자(백그라운드 탭 등)가 재생 실패로 스킵 신호를 보내더라도,
-      // 이미 누군가 재생에 성공해서 타이머가 가동 중이라면 스킵 신호를 철저히 무시합니다! (정상 게임 보호)
+      // 🚨 [방어벽 보강] 이미 누군가 재생에 성공해서 진짜 15초 타이머가 돌고 있다면 
+      // 뒤늦은 클라이언트의 스킵 신호는 완벽하게 씹어버립니다 (강제 조기 스킵 팀킬 방지!)
       if (room.answeredThisRound || room.roundTimer) return;
 
       room.answeredThisRound = true;
@@ -275,7 +273,7 @@ io.on('connection', (socket) => {
         room.loadingTimeoutTimer = null;
       }
 
-      // 디렉터님의 요청대로 안내 문구 없이 조용하고 빠르게 다음 문제로 패스!
+      // 재생 불가능한 완전 불량 파일일때만 문구 없이 초고속 다음 라운드 패스 연출
       checkEndOrNextRound(room);
     } catch (e) {
       console.error("Skip Round Error:", e);
@@ -287,10 +285,8 @@ io.on('connection', (socket) => {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.status !== 'PLAYING') return;
       
-      // 이미 처리가 완료되었거나 타이머가 가동 중이라면 무시
       if (room.answeredThisRound || room.roundTimer) return;
 
-      // 정상 기동되었으므로 백업용 로딩 타임아웃 청소
       if (room.loadingTimeoutTimer) {
         clearTimeout(room.loadingTimeoutTimer);
         room.loadingTimeoutTimer = null;
@@ -306,7 +302,7 @@ io.on('connection', (socket) => {
         }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000); 
       }
 
-      // 타이머 정상 출발
+      // 💡 진짜 15초 라운드 카운트다운 타이머 구동
       room.roundTimer = setTimeout(() => {
         try {
           room.hintTimer = null;
@@ -314,6 +310,7 @@ io.on('connection', (socket) => {
             room.answeredThisRound = true;
             
             const currentQuestion = room.questions[room.currentRound - 1];
+            // 🚨 타임아웃 끝났을 때 정답 텍스트를 무조건 패킷에 주입해 화면 배너에 공개하도록 안착!
             const answerText = currentQuestion?.answers?.[0] || '알 수 없음';
 
             io.to(room.code).emit('answer_result', {
@@ -334,7 +331,6 @@ io.on('connection', (socket) => {
         }
       }, ROUND_TIME_LIMIT * 1000);
 
-      // 타이머 작동 상태를 전 클라이언트에 즉시 동기화
       io.to(room.code).emit('room_update', getRoomState(room));
     } catch (e) {
       console.error("Youtube Playing Error:", e);
@@ -373,8 +369,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// ── Game flow helpers ─────────────────────────────────────────
-
 function startRound(room) {
   try {
     if (room.roundTimer) clearTimeout(room.roundTimer);
@@ -404,7 +398,7 @@ function startRound(room) {
 
     io.to(room.code).emit('room_update', getRoomState(room));
 
-    // 🚨 12초 동안 "아무도" 플레이에 성공하지 못하면, 불량 영상으로 판단해 조용히 다음으로 스킵!
+    // 15초간 아무도 방에 접속해서 재생 완료 신호를 안 보내면 불량 파일로 간주하고 무배너 통과 처리
     room.loadingTimeoutTimer = setTimeout(() => {
       try {
         if (room.status === 'PLAYING' && !room.roundTimer && !room.answeredThisRound) {
@@ -412,10 +406,9 @@ function startRound(room) {
           checkEndOrNextRound(room);
         }
       } catch (e) {
-        console.error("서버 독립 백업 스케줄러 에러 복구:", e);
         checkEndOrNextRound(room);
       }
-    }, 12000);
+    }, 15000);
 
   } catch (err) {
     console.error("라운드 빌드 예외 핸들링:", err);
@@ -432,7 +425,6 @@ function checkEndOrNextRound(room) {
       startRound(room);
     }
   } catch (error) {
-    console.error("라운드 스위칭 치명적 충돌 방어 완료:", error);
     endGame(room);
   }
 }
