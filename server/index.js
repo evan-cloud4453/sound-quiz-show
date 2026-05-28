@@ -134,6 +134,7 @@ io.on('connection', (socket) => {
           questions: [],
           roundTimer: null,
           hintTimer: null,
+          loadingTimeoutTimer: null, // 💡 서버 전용 물리 백업 타이머 레퍼런스
           answeredThisRound: false,
           firstCorrectPlayerId: null,
           isStarting: false
@@ -223,6 +224,10 @@ io.on('connection', (socket) => {
           clearTimeout(room.hintTimer);
           room.hintTimer = null;
         }
+        if (room.loadingTimeoutTimer) {
+          clearTimeout(room.loadingTimeoutTimer);
+          room.loadingTimeoutTimer = null;
+        }
 
         player.score += 1;
         io.to(room.code).emit('room_update', getRoomState(room));
@@ -248,11 +253,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 🚨 재생 불가 시 불필요한 전송 문구 처리 없이 다이렉트로 다음 방 전환 연출 트리거
+  // ── skip_round (멀티 레이스 컨디션 방어락 적용) ─────────────────
   socket.on('skip_round', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.status !== 'PLAYING') return;
+
+      // 🚨 [방어막] 이미 다른 플레이어의 스킵 신호로 처리가 완료되었다면 즉시 차단! (무한정지 완벽 해결)
+      if (room.answeredThisRound) return;
+      room.answeredThisRound = true;
 
       if (room.roundTimer) {
         clearTimeout(room.roundTimer);
@@ -262,9 +271,20 @@ io.on('connection', (socket) => {
         clearTimeout(room.hintTimer);
         room.hintTimer = null;
       }
+      if (room.loadingTimeoutTimer) {
+        clearTimeout(room.loadingTimeoutTimer);
+        room.loadingTimeoutTimer = null;
+      }
 
-      room.answeredThisRound = true;
-      checkEndOrNextRound(room); // 대기 연출 없이 완전 다이렉트로 전환
+      io.to(room.code).emit('answer_result', {
+        correct: false,
+        noWinner: true,
+        answer: room.questions[room.currentRound - 1]?.answers[0] || '알 수 없음',
+        message: '영상을 재생할 수 없어 스킵했습니다.',
+        scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+      });
+
+      setTimeout(() => checkEndOrNextRound(room), 2500);
     } catch (e) {
       console.error("Skip Round Error:", e);
     }
@@ -273,49 +293,56 @@ io.on('connection', (socket) => {
   socket.on('youtube_playing', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
+      if (!room || room.status !== 'PLAYING') return;
       
-      if (room && room.status === 'PLAYING' && !room.roundTimer) {
-        const question = room.questions[room.currentRound - 1];
-        
-        if (question && question.hint) {
-          room.hintTimer = setTimeout(() => {
-            if (room.status === 'PLAYING' && !room.answeredThisRound) {
-              io.to(room.code).emit('hint_revealed', { hint: question.hint });
-            }
-          }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000); 
-        }
+      // 이미 처리가 완료되었거나 타이머가 가동 중이라면 무시
+      if (room.answeredThisRound || room.roundTimer) return;
 
-        // 💡 0초 정지 버그를 뚫어내는 무적의 비동기 타임아웃 쉴드
-        room.roundTimer = setTimeout(() => {
-          try {
-            room.hintTimer = null;
-            if (!room.answeredThisRound) {
-              room.answeredThisRound = true;
-              
-              const currentQuestion = room.questions[room.currentRound - 1];
-              const answerText = currentQuestion?.answers?.[0] || '알 수 없음';
-
-              io.to(room.code).emit('answer_result', {
-                correct: false,
-                noWinner: true,
-                answer: answerText,
-                message: '아무도 점수를 얻지 못했습니다 (0점)',
-                scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-              });
-
-              // 확실하게 타임아웃 2.5초 뒤 다음 맵핑 진행
-              setTimeout(() => {
-                try { checkEndOrNextRound(room); } catch (e) { console.error(e); }
-              }, 2500);
-            }
-          } catch (timerError) {
-            console.error("타이머 내부 동작 치명적 에러 캐치:", timerError);
-            setTimeout(() => checkEndOrNextRound(room), 100);
-          }
-        }, ROUND_TIME_LIMIT * 1000);
-
-        io.to(room.code).emit('room_update', getRoomState(room));
+      // 정상 기동되었으므로 백업용 로딩 타임아웃 청소
+      if (room.loadingTimeoutTimer) {
+        clearTimeout(room.loadingTimeoutTimer);
+        room.loadingTimeoutTimer = null;
       }
+
+      const question = room.questions[room.currentRound - 1];
+      
+      if (question && question.hint) {
+        room.hintTimer = setTimeout(() => {
+          if (room.status === 'PLAYING' && !room.answeredThisRound) {
+            io.to(room.code).emit('hint_revealed', { hint: question.hint });
+          }
+        }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000); 
+      }
+
+      // 💡 0초 정지 무한 대기를 뚫어내는 무적의 타임아웃 예외 쉴드
+      room.roundTimer = setTimeout(() => {
+        try {
+          room.hintTimer = null;
+          if (!room.answeredThisRound) {
+            room.answeredThisRound = true;
+            
+            const currentQuestion = room.questions[room.currentRound - 1];
+            const answerText = currentQuestion?.answers?.[0] || '알 수 없음';
+
+            io.to(room.code).emit('answer_result', {
+              correct: false,
+              noWinner: true,
+              answer: answerText,
+              message: '아무도 점수를 얻지 못했습니다 (0점)',
+              scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+            });
+
+            setTimeout(() => {
+              try { checkEndOrNextRound(room); } catch (e) { console.error(e); }
+            }, 2500);
+          }
+        } catch (timerError) {
+          console.error("타이머 내부 동작 예외 복구 완료:", timerError);
+          setTimeout(() => checkEndOrNextRound(room), 100);
+        }
+      }, ROUND_TIME_LIMIT * 1000);
+
+      io.to(room.code).emit('room_update', getRoomState(room));
     } catch (e) {
       console.error("Youtube Playing Error:", e);
     }
@@ -333,6 +360,7 @@ io.on('connection', (socket) => {
     if (room.players.length === 0) {
       if (room.roundTimer) clearTimeout(room.roundTimer);
       if (room.hintTimer) clearTimeout(room.hintTimer);
+      if (room.loadingTimeoutTimer) clearTimeout(room.loadingTimeoutTimer);
       rooms.delete(roomCode);
       return;
     }
@@ -352,12 +380,16 @@ io.on('connection', (socket) => {
   });
 });
 
+// ── Game flow helpers ─────────────────────────────────────────
+
 function startRound(room) {
   try {
     if (room.roundTimer) clearTimeout(room.roundTimer);
     if (room.hintTimer) clearTimeout(room.hintTimer);
+    if (room.loadingTimeoutTimer) clearTimeout(room.loadingTimeoutTimer);
     room.roundTimer = null;
     room.hintTimer = null;
+    room.loadingTimeoutTimer = null;
 
     room.currentRound += 1;
     room.answeredThisRound = false;
@@ -378,8 +410,33 @@ function startRound(room) {
     });
 
     io.to(room.code).emit('room_update', getRoomState(room));
+
+    // 🚨 [무적의 서버 자체 독립 타이머 구축]
+    // 12초 동안 그 어떤 참가자도 재생 신호를 보내지 못하면 영상 폭파(재생 불가)로 단정 짓고 
+    // 서버가 알아서 다음 라운드로 다이렉트 강제 패스 진행! (클라이언트 마비 차단책)
+    room.loadingTimeoutTimer = setTimeout(() => {
+      try {
+        if (room.status === 'PLAYING' && !room.roundTimer && !room.answeredThisRound) {
+          room.answeredThisRound = true;
+          
+          io.to(room.code).emit('answer_result', {
+            correct: false,
+            noWinner: true,
+            answer: question?.answers?.[0] || '알 수 없음',
+            message: '음원 재생 지연으로 라운드를 스킵합니다.',
+            scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+          });
+
+          setTimeout(() => checkEndOrNextRound(room), 2500);
+        }
+      } catch (e) {
+        console.error("서버 독립 백업 스케줄러 에러 복구:", e);
+        checkEndOrNextRound(room);
+      }
+    }, 12000);
+
   } catch (err) {
-    console.error("라운드 시작 도중 에러 방어:", err);
+    console.error("라운드 빌드 예외 핸들링:", err);
     endGame(room);
   }
 }
@@ -393,21 +450,19 @@ function checkEndOrNextRound(room) {
       startRound(room);
     }
   } catch (error) {
-    console.error("라운드 변환 도중 0초 고정 방어:", error);
+    console.error("라운드 스위칭 치명적 충돌 방어 완료:", error);
     endGame(room);
   }
 }
 
 function endGame(room) {
   try {
-    if (room.roundTimer) {
-      clearTimeout(room.roundTimer);
-      room.roundTimer = null;
-    }
-    if (room.hintTimer) {
-      clearTimeout(room.hintTimer);
-      room.hintTimer = null;
-    }
+    if (room.roundTimer) clearTimeout(room.roundTimer);
+    if (room.hintTimer) clearTimeout(room.hintTimer);
+    if (room.loadingTimeoutTimer) clearTimeout(room.loadingTimeoutTimer);
+    room.roundTimer = null;
+    room.hintTimer = null;
+    room.loadingTimeoutTimer = null;
 
     const finalScores = room.players
       .map(p => ({ ...p }))
@@ -427,7 +482,7 @@ function endGame(room) {
       io.to(room.code).emit('room_update', getRoomState(room));
     }, 1000);
   } catch (err) {
-    console.error("엔드게임 예외 핸들링:", err);
+    console.error("엔드 배틀 상태 변환 에러 핸들링:", err);
   }
 }
 
