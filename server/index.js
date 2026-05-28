@@ -387,23 +387,27 @@ function endGame(room) {
     room.hintTimer = null;
   }
 
-  const sorted = [...room.players].sort((a, b) => b.score - a.score);
+  const finalScores = room.players
+    .map(p => ({ ...p }))
+    .sort((a, b) => b.score - a.score);
+
   room.status = 'WAITING';
   room.currentRound = 0;
-  room.players.forEach(p => { p.score = 0; p.isReady = false; });
-
-  io.to(room.code).emit('game_over', {
-    winner: sorted[0],
-    finalScores: sorted,
-    roomCode: room.code
+  room.players.forEach(p => { 
+    p.score = 0; 
+    p.isReady = false; 
   });
 
-  // Reset room state for rematch
+  io.to(room.code).emit('game_over', { 
+    winner: finalScores[0], 
+    finalScores: finalScores, 
+    roomCode: room.code 
+  });
+
   setTimeout(() => {
     io.to(room.code).emit('room_update', getRoomState(room));
   }, 1000);
 }
-
 // ── Boot ──────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
