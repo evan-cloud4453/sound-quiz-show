@@ -25,83 +25,14 @@ app.use(express.json());
 app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 app.get('/', (_, res) => res.json({ name: 'Sound Quiz Show Server', version: '1.0.0' }));
 
+
+const { RAW_QUIZ_DATA } = require('./quizData');
 // ── In-memory state ───────────────────────────────────────────
 // rooms: Map<roomCode, Room>
 const rooms = new Map();
 
 // 내장 퀴즈 데이터 (음원 없이 유튜브 임베드 또는 MP3 URL로 교체 가능)
-const QUIZ_DATA = [
-  {
-    id: 'q001', category: '애니메이션',
-    audioUrl: 'https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3',
-    hint: '인기 겨울 애니메이션 주제가',
-    answers: ['겨울왕국', '겨울 왕국', 'frozen', '렛잇고'],
-    difficulty: 1
-  },
-  {
-    id: 'q002', category: '동물',
-    audioUrl: 'https://www.soundjay.com/nature/sounds/cat-meow-1.mp3',
-    hint: '집에서 키우는 반려동물',
-    answers: ['고양이', 'cat'],
-    difficulty: 1
-  },
-  {
-    id: 'q003', category: '자연',
-    audioUrl: 'https://www.soundjay.com/nature/sounds/rain-03.mp3',
-    hint: '하늘에서 내리는 것',
-    answers: ['비', '빗소리', 'rain'],
-    difficulty: 1
-  },
-  {
-    id: 'q004', category: '동물',
-    audioUrl: 'https://www.soundjay.com/nature/sounds/dog-barking-1.mp3',
-    hint: '충성스러운 반려동물',
-    answers: ['개', '강아지', '개 짖는 소리', 'dog'],
-    difficulty: 1
-  },
-  {
-    id: 'q005', category: '자연',
-    audioUrl: 'https://www.soundjay.com/nature/sounds/thunder-1.mp3',
-    hint: '비가 올 때 번개와 함께',
-    answers: ['천둥', '번개', 'thunder'],
-    difficulty: 2
-  },
-  {
-    id: 'q006', category: '생활',
-    audioUrl: 'https://www.soundjay.com/misc/sounds/phone-ringing-1.mp3',
-    hint: '연락 수단',
-    answers: ['전화', '전화벨', '핸드폰', 'phone'],
-    difficulty: 1
-  },
-  {
-    id: 'q007', category: '탈것',
-    audioUrl: 'https://www.soundjay.com/transportation/sounds/train-2.mp3',
-    hint: '철로 위를 달리는 것',
-    answers: ['기차', '열차', 'train'],
-    difficulty: 1
-  },
-  {
-    id: 'q008', category: '자연',
-    audioUrl: 'https://www.soundjay.com/nature/sounds/ocean-wave-1.mp3',
-    hint: '바닷가에서 들리는 소리',
-    answers: ['파도', '바다', '파도 소리', 'ocean', 'wave'],
-    difficulty: 1
-  },
-  {
-    id: 'q009', category: '생활',
-    audioUrl: 'https://www.soundjay.com/misc/sounds/clock-ticking-2.mp3',
-    hint: '시간을 알려주는 것',
-    answers: ['시계', '시계 소리', 'clock'],
-    difficulty: 1
-  },
-  {
-    id: 'q010', category: '동물',
-    audioUrl: 'https://www.soundjay.com/nature/sounds/rooster-1.mp3',
-    hint: '새벽을 알리는 농장 동물',
-    answers: ['닭', '수탉', '닭 울음', 'rooster', '꼬끼오'],
-    difficulty: 2
-  }
-];
+console.log(`총 ${RAW_QUIZ_DATA.length}개의 퀴즈 데이터를 성공적으로 불러왔습니다.`);
 
 // ── Utility functions ─────────────────────────────────────────
 
