@@ -1,430 +1,443 @@
-require('dotenv').config();
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const cors = require('cors');
-const { v4: uuidv4 } = require('uuid');
-const Question = require('./models/Question');
+// client/src/pages/GameScreen.jsx
 
-async function setupRoomQuestions(room) {
-  try {
-    // DB에서 랜덤하게 10개의 문제를 뽑아옵니다.
-    const randomQuestions = await Question.aggregate([{ $sample: { size: 10 } }]);
-    
-    // 뽑아온 문제를 방 데이터에 할당
-    room.questions = randomQuestions;
-    room.currentRound = 1;
-  } catch (error) {
-    console.error("DB에서 문제를 가져오는데 실패했습니다:", error);
-  }
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { useGame } from '../utils/GameContext'
+// 아래 한 줄을 import 영역에 추가합니다.
+import { useSocket } from '../hooks/useSocket' 
+
+import WaveformVisualizer from '../components/WaveformVisualizer'
+import TimerRing from '../components/TimerRing'
+import './GameScreen.css'
+
+
+const YOUTUBE_PLAYER_STATE = {
+  ENDED: 0,
+  PLAYING: 1,
+  PAUSED: 2
 }
 
-const app = express();
-const server = http.createServer(app);
+let youtubeApiPromise = null
 
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
-const ROUND_COUNT = 10;
-const ROUND_TIME_LIMIT = 15;
-const HINT_REVEAL_SECONDS = 5;
+function loadYouTubeApi() {
+  if (typeof window === 'undefined') return Promise.reject(new Error('YouTube API requires a browser'))
+  if (window.YT?.Player) return Promise.resolve(window.YT)
+  if (youtubeApiPromise) return youtubeApiPromise
 
-const io = new Server(server, {
-  cors: {
-    origin: [CLIENT_URL, /\.vercel\.app$/, /\.netlify\.app$/],
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
-});
-
-app.use(cors({ origin: CLIENT_URL }));
-app.use(express.json());
-
-// ── Health check ──────────────────────────────────────────────
-app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
-app.get('/', (_, res) => res.json({ name: 'Sound Quiz Show Server', version: '1.0.0' }));
-
-
-const { RAW_QUIZ_DATA } = require('./quizData');
-// ── In-memory state ───────────────────────────────────────────
-// rooms: Map<roomCode, Room>
-const rooms = new Map();
-
-// 내장 퀴즈 데이터. start_game은 이 정규화된 배열만 사용한다.
-const QUIZ_DATA = RAW_QUIZ_DATA.map(question => ({
-  ...question,
-  audioUrl: question.audioUrl || null,
-  youtubeId: question.youtubeId || null,
-  youtubeStart: Number(question.youtubeStart ?? question.start ?? 0),
-  youtubeEnd: Number(question.youtubeEnd ?? question.end ?? 0)
-}));
-
-console.log(`총 ${QUIZ_DATA.length}개의 퀴즈 데이터를 성공적으로 불러왔습니다.`);
-console.log(`[Quiz] YouTube playable questions: ${getPlayableQuestions().length}/${QUIZ_DATA.length}`);
-
-// ── Utility functions ─────────────────────────────────────────
-
-function generateRoomCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
-}
-
-function getPlayableQuestions() {
-  return QUIZ_DATA.filter(question => question.youtubeId || question.audioUrl);
-}
-
-function getRandomQuestions(count = 10) {
-  const shuffled = [...getPlayableQuestions()].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(count, shuffled.length));
-}
-
-// Smart grading: normalise → exact match → similarity
-function normalise(text) {
-  return text
-    .toLowerCase()
-    .replace(/[\s\-_.,!?'"]/g, '')
-    .trim();
-}
-
-function levenshtein(a, b) {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-  return dp[m][n];
-}
-
-function smartGrade(submitted, answers) {
-  const normSubmit = normalise(submitted);
-  if (!normSubmit) return false;
-
-  for (const ans of answers) {
-    const normAns = normalise(ans);
-
-    // Exact match
-    if (normSubmit === normAns) return true;
-
-    // Similarity (Levenshtein)
-    if (normAns.length >= 3) {
-      const dist = levenshtein(normSubmit, normAns);
-      const similarity = 1 - dist / Math.max(normAns.length, normSubmit.length);
-      if (similarity >= 0.8 || dist === 1) return true;
+  youtubeApiPromise = new Promise((resolve, reject) => {
+    const previousCallback = window.onYouTubeIframeAPIReady
+    window.onYouTubeIframeAPIReady = () => {
+      previousCallback?.()
+      resolve(window.YT)
     }
-  }
-  return false;
+
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const script = document.createElement('script')
+      script.src = 'https://www.youtube.com/iframe_api'
+      script.async = true
+      script.onerror = () => reject(new Error('Failed to load YouTube IFrame API'))
+      document.head.appendChild(script)
+    }
+  })
+
+  return youtubeApiPromise
 }
 
-function getRoomState(room) {
-  return {
-    roomCode: room.code,
-    hostId: room.hostId,
-    players: room.players.map(p => ({
-      id: p.id,
-      nickname: p.nickname,
-      score: p.score,
-      isReady: p.isReady,
-      isHost: p.id === room.hostId
-    })),
-    status: room.status,
-    currentRound: room.currentRound,
-    totalRounds: room.totalRounds,
-    targetScore: room.targetScore
-  };
+function getClipEnd(start, end) {
+  return end > start ? end : start + 10
 }
 
-// ── Socket.io handlers ────────────────────────────────────────
+const AVATARS = ['🚀', '⭐', '🌙', '💫', '🪐', '☄️', '🌟', '🎵', '👾', '🛸', '🌌', '🔭']
+function getAvatar(id) {
+  return AVATARS[(id?.charCodeAt(id.length - 1) || 0) % AVATARS.length]
+}
 
-io.on('connection', (socket) => {
-  console.log(`[CONNECT] ${socket.id}`);
+export default function GameScreen() {
+  const { state, submitAnswer } = useGame()
+  const { emit } = useSocket()
+  const {
+    players, myId, nickname,
+    currentRound, totalRounds, category, hint,
+    youtubeId, youtubeStart, youtubeEnd,
+    roundActive, lastResult, targetScore
+  } = state
 
-  // ── join_room ──────────────────────────────────────────────
-  socket.on('join_room', ({ nickname, roomCode }, cb) => {
+  const [answer, setAnswer] = useState('')
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [mediaLoaded, setMediaLoaded] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [flashWrong, setFlashWrong] = useState(false)
+  const [phaseLabel, setPhaseLabel] = useState('다음 라운드 준비 중...')
+  const [showResult, setShowResult] = useState(false)
+  const [playbackBlocked, setPlaybackBlocked] = useState(false)
+  const [playbackError, setPlaybackError] = useState(false)
+
+  const inputRef = useRef(null)
+  const playerRef = useRef(null)
+  const playerHostIdRef = useRef(`youtube-player-${Math.random().toString(36).slice(2)}`)
+  const roundTokenRef = useRef(0)
+
+  const playYouTube = useCallback(() => {
+    const player = playerRef.current
+    if (!player || !youtubeId) return
+
     try {
-      let room;
-      let isNewRoom = false;
+      player.playVideo()
+      setPlaybackBlocked(false)
+      setPlaybackError(false)
+      setPhaseLabel('소리를 들어보세요!')
+    } catch (error) {
+      setPlaybackBlocked(true)
+      setPhaseLabel('재생 버튼을 눌러주세요')
+    }
+  }, [youtubeId])
 
-      if (roomCode) {
-        // Join existing
-        room = rooms.get(roomCode.toUpperCase());
-        if (!room) return cb({ error: '존재하지 않는 방 코드입니다.' });
-        if (room.status === 'PLAYING') return cb({ error: '이미 게임이 진행 중인 방입니다.' });
-        if (room.players.length >= 8) return cb({ error: '방이 가득 찼습니다. (최대 8명)' });
+  useEffect(() => {
+    return () => {
+      try {
+        playerRef.current?.destroy?.()
+      } catch (error) {
+        // Player teardown is best-effort; navigation should not be blocked by it.
+      }
+      playerRef.current = null
+    }
+  }, [])
+
+  // New round: reset state and load the YouTube clip.
+  useEffect(() => {
+    const roundToken = roundTokenRef.current + 1
+    roundTokenRef.current = roundToken
+
+    setAnswer('')
+    setSubmitted(false)
+    setFlashWrong(false)
+    setIsPlaying(false)
+    setMediaLoaded(false)
+    setShowResult(false)
+    setPlaybackBlocked(false)
+    setPlaybackError(false)
+    setPhaseLabel('YouTube 플레이어 준비 중...')
+
+    if (!youtubeId) {
+      setMediaLoaded(true)
+      if (currentRound > 0) {
+        setPlaybackError(true)
+        setPhaseLabel('YouTube 영상이 설정되지 않았습니다')
       } else {
-        // Create new room
-        let code;
-        do { code = generateRoomCode(); } while (rooms.has(code));
-        room = {
-          code,
-          hostId: socket.id,
-          players: [],
-          status: 'WAITING',
-          currentRound: 0,
-          totalRounds: ROUND_COUNT,
-          targetScore: 5,
-          questions: [],
-          roundTimer: null,
-          hintTimer: null,
-          answeredThisRound: false,
-          firstCorrectPlayerId: null,
-          isStarting: false
-        };
-        rooms.set(code, room);
-        isNewRoom = true;
+        setPhaseLabel('다음 라운드 준비 중...')
       }
-
-      // Add player
-      room.players.push({
-        id: socket.id,
-        nickname: nickname || `플레이어${room.players.length + 1}`,
-        score: 0,
-        isReady: false
-      });
-
-      socket.join(room.code);
-      socket.data.roomCode = room.code;
-      socket.data.nickname = nickname;
-
-      io.to(room.code).emit('room_update', getRoomState(room));
-      cb({ success: true, roomCode: room.code, isHost: isNewRoom });
-      console.log(`[JOIN] ${nickname} → room ${room.code}`);
-    } catch (e) {
-      console.error(e);
-      cb({ error: '서버 오류가 발생했습니다.' });
+      return undefined
     }
 
-    socket.on('youtube_playing', () => {
-  const room = rooms.get(socket.data.roomCode);
-  // 방이 존재하고 아직 해당 라운드의 타이머가 돌지 않았을 때만 15초 시작
-  if (room && room.status === 'PLAYING' && !room.roundTimer) {
-    room.roundTimer = setTimeout(() => {
-      room.hintTimer = null;
-      if (!room.answeredThisRound) {
-        room.players.forEach(p => { p.score += 1; });
-      }
-      checkEndOrNextRound(room);
-    }, 15000);
-  }
-});
-  });
+    let cancelled = false
+    const startSeconds = Number(youtubeStart) || 0
+    const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0)
 
-  // ── start_game ─────────────────────────────────────────────
-  socket.on('start_game', ({ targetScore = 5 }, cb) => {
-    let room;
-    try {
-      room = rooms.get(socket.data.roomCode);
-      if (!room) return cb?.({ error: '방을 찾을 수 없습니다.' });
-      if (room.hostId !== socket.id) return cb?.({ error: '방장만 게임을 시작할 수 있습니다.' });
-      if (room.players.length < 1) return cb?.({ error: '최소 1명 이상 필요합니다.' });
-      if (room.isStarting) return cb?.({ error: '게임을 시작하는 중입니다. 잠시만 기다려주세요.' });
+    const loadClip = (player) => {
+      if (cancelled || roundTokenRef.current !== roundToken) return
 
-      const questions = getRandomQuestions(ROUND_COUNT);
-      if (questions.length === 0) {
-        return cb?.({
-          error: '재생 가능한 YouTube 문제가 없습니다. quizData.js에 youtubeId를 추가해주세요.'
-        });
-      }
-
-      room.isStarting = true;
-      room.status = 'PLAYING';
-      room.currentRound = 0;
-      room.targetScore = Number(targetScore) || 5;
-      room.questions = questions;
-      room.totalRounds = questions.length;
-      room.players.forEach(p => { p.score = 0; });
-
-      io.to(room.code).emit('room_update', getRoomState(room));
-      io.to(room.code).emit('game_started', { totalRounds: room.questions.length, targetScore: room.targetScore });
-
-      cb?.({ success: true });
-      setTimeout(() => startRound(room), 1500);
-    } catch (e) {
-      console.error(e);
-      cb?.({ error: '서버 오류가 발생했습니다.' });
-    } finally {
-      if (room) room.isStarting = false;
+      setMediaLoaded(true)
+      setPhaseLabel('소리를 들어보세요!')
+      player.loadVideoById({
+        videoId: youtubeId,
+        startSeconds,
+        endSeconds
+      })
+      setTimeout(() => {
+        if (!cancelled && roundTokenRef.current === roundToken) playYouTube()
+      }, 150)
     }
-  });
 
-  // ── submit_answer ──────────────────────────────────────────
-  socket.on('submit_answer', ({ answer }) => {
-    try {
-      const room = rooms.get(socket.data.roomCode);
-      if (!room || room.status !== 'PLAYING') return;
+    loadYouTubeApi()
+      .then(YT => {
+        if (cancelled || roundTokenRef.current !== roundToken) return
 
-      const player = room.players.find(p => p.id === socket.id);
-      if (!player) return;
-
-      // Already someone answered correctly this round
-      if (room.answeredThisRound) return;
-
-      const question = room.questions[room.currentRound - 1];
-      if (!question) return;
-
-      const isCorrect = smartGrade(answer, question.answers);
-
-      if (isCorrect) {
-        room.answeredThisRound = true;
-        room.firstCorrectPlayerId = socket.id;
-
-        if (room.roundTimer) {
-          clearTimeout(room.roundTimer);
-          room.roundTimer = null;
-        }
-        if (room.hintTimer) {
-          clearTimeout(room.hintTimer);
-          room.hintTimer = null;
+        if (playerRef.current?.loadVideoById) {
+          loadClip(playerRef.current)
+          return
         }
 
-        // Score: correct player +1
-        player.score += 1;
-        io.to(room.code).emit('room_update', getRoomState(room));
+        playerRef.current = new YT.Player(playerHostIdRef.current, {
+          width: 220,
+          height: 200,
+          videoId: youtubeId,
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            iv_load_policy: 3,
+            playsinline: 1,
+            rel: 0,
+            start: Math.floor(startSeconds),
+            end: Math.floor(endSeconds),
+            origin: window.location.origin
+          },
+          events: {
+            onReady: event => loadClip(event.target),
+            onStateChange: event => {
+              if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
+                setIsPlaying(true)
+                setPlaybackBlocked(false)
+                setPlaybackError(false)
+                setPhaseLabel('소리를 들어보세요!')
+              }
+              if (event.data === YOUTUBE_PLAYER_STATE.PAUSED || event.data === YOUTUBE_PLAYER_STATE.ENDED) {
+                setIsPlaying(false)
+              }
+            },
+            onError: () => {
+              setMediaLoaded(true)
+              setIsPlaying(false)
+              setPlaybackBlocked(false)
+              setPlaybackError(true)
+              setPhaseLabel('YouTube 영상을 재생할 수 없습니다')
+            },
+            onAutoplayBlocked: () => {
+              setMediaLoaded(true)
+              setIsPlaying(false)
+              setPlaybackBlocked(true)
+              setPhaseLabel('재생 버튼을 눌러주세요')
+            }
+          }
+        })
+      })
+      .catch(() => {
+        setMediaLoaded(true)
+        setPlaybackError(true)
+        setPhaseLabel('YouTube 플레이어를 불러오지 못했습니다')
+      })
 
-        io.to(room.code).emit('answer_result', {
-          correct: true,
-          winnerId: socket.id,
-          winnerNickname: player.nickname,
-          answer: question.answers[0],
-          scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-        });
-
-        setTimeout(() => checkEndOrNextRound(room), 2500);
-      } else {
-        // Tell only this player it was wrong
-        socket.emit('answer_result', {
-          correct: false,
-          playerId: socket.id,
-          message: '틀렸습니다! 다시 시도해보세요.'
-        });
+    return () => {
+      cancelled = true
+      try {
+        playerRef.current?.stopVideo?.()
+      } catch (error) {
+        // Stopping is best-effort while changing rounds.
       }
-    } catch (e) {
-      console.error(e);
     }
-  });
+  }, [youtubeId, youtubeStart, youtubeEnd, currentRound, playYouTube])
 
-  // ── disconnect ─────────────────────────────────────────────
-  socket.on('disconnect', () => {
-    const roomCode = socket.data.roomCode;
-    if (!roomCode) return;
-
-    const room = rooms.get(roomCode);
-    if (!room) return;
-
-    room.players = room.players.filter(p => p.id !== socket.id);
-    console.log(`[LEAVE] ${socket.data.nickname} left room ${roomCode}`);
-
-    if (room.players.length === 0) {
-      if (room.roundTimer) clearTimeout(room.roundTimer);
-      if (room.hintTimer) clearTimeout(room.hintTimer);
-      rooms.delete(roomCode);
-      console.log(`[DELETE] Room ${roomCode} removed`);
-      return;
+  // Auto focus input when round active
+  useEffect(() => {
+    if (roundActive && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 300)
     }
+  }, [roundActive])
 
-    // Transfer host if needed
-    if (room.hostId === socket.id) {
-      room.hostId = room.players[0].id;
-      io.to(roomCode).emit('system_message', {
-        text: `${room.players[0].nickname}님이 새로운 방장이 되었습니다.`
-      });
+  // 유튜브 미디어가 재생 중이고 라운드가 활성화되었을 때 서버로 타이머 시작 신호 전송
+  useEffect(() => {
+    if (isPlaying && roundActive) {
+      emit('youtube_playing'); 
     }
+  }, [isPlaying, roundActive, emit]);
 
-    io.to(roomCode).emit('room_update', getRoomState(room));
+  // Show result overlay and stop the clip
+  useEffect(() => {
+    if (lastResult) {
+      const isRoundResult = lastResult.correct || lastResult.noWinner || lastResult.winnerId
+      if (!isRoundResult) return undefined
 
-    // If game in progress and only 1 player, end game
-    if (room.status === 'PLAYING' && room.players.length < 1) {
-      endGame(room);
+      try {
+        playerRef.current?.pauseVideo?.()
+      } catch (error) {
+        // The result overlay should still render even if the player refuses.
+      }
+
+      setShowResult(true)
+      setPhaseLabel(lastResult.correct ? '🎉 정답!' : '⏰ 시간 초과!')
+      const t = setTimeout(() => setShowResult(false), 2500)
+      return () => clearTimeout(t)
     }
-  });
-});
+    return undefined
+  }, [lastResult])
 
-// ── Game flow helpers ─────────────────────────────────────────
+  const handleSubmit = useCallback(() => {
+    if (!answer.trim() || submitted || !roundActive) return
+    setSubmitted(true)
+    submitAnswer(answer.trim())
+    // If wrong, server sends answer_result with correct:false for this socket only
+  }, [answer, submitted, roundActive, submitAnswer])
 
-function startRound(room) {
-  if (room.roundTimer) clearTimeout(room.roundTimer);
-  if (room.hintTimer) clearTimeout(room.hintTimer);
-
-  room.currentRound += 1;
-  room.answeredThisRound = false;
-  room.firstCorrectPlayerId = null;
-
-  const question = room.questions[room.currentRound - 1];
-  if (!question) return endGame(room);
-
-  const roundNumber = room.currentRound;
-
-  io.to(room.code).emit('round_start', {
-    round: roundNumber,
-    totalRounds: room.questions.length,
-    category: question.category,
-    audioUrl: question.audioUrl,
-    youtubeId: question.youtubeId,
-    youtubeStart: question.youtubeStart,
-    youtubeEnd: question.youtubeEnd,
-    timeLimit: ROUND_TIME_LIMIT
-  });
-
-  if (question.hint) {
-    room.hintTimer = setTimeout(() => {
-      if (room.status !== 'PLAYING') return;
-      if (room.currentRound !== roundNumber || room.answeredThisRound) return;
-      io.to(room.code).emit('hint_revealed', { hint: question.hint });
-      room.hintTimer = null;
-    }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000);
+  const handleKey = (e) => {
+    if (e.key === 'Enter') handleSubmit()
   }
+
+  // Flash wrong when server says incorrect (only personal)
+  useEffect(() => {
+    if (lastResult && !lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) {
+      setSubmitted(false) // allow resubmit
+      setAnswer('')
+      setFlashWrong(true)
+      setTimeout(() => setFlashWrong(false), 600)
+      inputRef.current?.focus()
+    }
+  }, [lastResult])
+
+  const sortedPlayers = [...players].sort((a, b) => b.score - a.score)
+
+  const progressPct = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
+
+  return (
+    <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
+
+      {/* Result overlay */}
+      {showResult && lastResult && (
+        <div className={`result-overlay ${lastResult.correct || lastResult.noWinner ? 'show' : ''}`}>
+          {lastResult.winnerId && (
+            <div className="result-banner correct animate-scaleIn">
+              <div className="result-icon">🎯</div>
+              <div className="result-text">
+                <span className="result-winner">{lastResult.winnerNickname}</span>
+                <span>정답!</span>
+              </div>
+              <div className="result-answer">정답: {lastResult.answer}</div>
+            </div>
+          )}
+          {lastResult.noWinner && (
+            <div className="result-banner timeout animate-scaleIn">
+              <div className="result-icon">⏰</div>
+              <div className="result-text">시간 초과!</div>
+              <div className="result-answer">정답: {lastResult.answer}</div>
+              <div className="result-sub">모두에게 +1점</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="game-layout">
+
+        {/* LEFT: Scoreboard */}
+        <div className="scoreboard-panel glass-panel">
+          <div className="scoreboard-title">🏆 스코어보드</div>
+          <div className="score-list">
+            {sortedPlayers.map((p, i) => {
+              const isMe = p.id === myId || p.nickname === nickname
+              const isWinner = lastResult?.winnerId === p.id
+              return (
+                <div
+                  key={p.id}
+                  className={`score-row ${isMe ? 'me' : ''} ${isWinner ? 'just-won' : ''}`}
+                >
+                  <span className="rank-num">{i + 1}</span>
+                  <span className="player-ava">{getAvatar(p.id)}</span>
+                  <span className="score-name">
+                    {p.nickname}
+                    {isMe && <span className="me-badge">나</span>}
+                  </span>
+                  <div className="score-bar-wrap">
+                    <div
+                      className="score-bar"
+                      style={{ width: `${Math.min((p.score / targetScore) * 100, 100)}%` }}
+                    />
+                  </div>
+                  <span className="score-num">{p.score}</span>
+                  <span className="score-target">/{targetScore}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* CENTER: Game area */}
+        <div className="game-center">
+
+          {/* Progress bar */}
+          <div className="round-progress">
+            <div className="round-info">
+              <span className="glow-cyan">라운드 {currentRound}</span>
+              <span className="text-secondary"> / {totalRounds}</span>
+            </div>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${progressPct}%` }} />
+            </div>
+          </div>
+
+          {/* Category */}
+          {category && (
+            <div className="category-row animate-fadeIn">
+              <div className="category-badge">🎵 {category}</div>
+              {hint && <span className="hint-text">힌트: {hint}</span>}
+            </div>
+          )}
+
+          {/* YouTube player + visualizer */}
+          <div className="audio-area glass-panel">
+            <div className="audio-inner youtube-audio-inner">
+              <div className="youtube-player-shell">
+                <div id={playerHostIdRef.current} />
+              </div>
+
+              <div className="youtube-sound-panel">
+                {mediaLoaded ? (
+                  <WaveformVisualizer isPlaying={isPlaying} />
+                ) : (
+                  <div className="audio-loading">
+                    <div className="loading-spinner" />
+                    <span>사운드 로딩 중...</span>
+                  </div>
+                )}
+                {playbackBlocked && (
+                  <button className="btn btn-secondary audio-play-btn" onClick={playYouTube}>
+                    ▶ 재생
+                  </button>
+                )}
+                {playbackError && (
+                  <div className="audio-error">YouTube 영상을 재생할 수 없습니다.</div>
+                )}
+                <div className="phase-label">{phaseLabel}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Answer input area */}
+          <div className={`answer-area glass-panel ${roundActive ? 'active' : ''}`}>
+            {roundActive ? (
+              <>
+                <div className="answer-row">
+                  <input
+                    ref={inputRef}
+                    className={`input answer-input ${flashWrong ? 'wrong' : ''}`}
+                    placeholder="정답을 입력하세요..."
+                    value={answer}
+                    onChange={e => setAnswer(e.target.value)}
+                    onKeyDown={handleKey}
+                    disabled={submitted && !flashWrong}
+                    maxLength={40}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                  />
+                  <button
+                    className="btn btn-primary submit-btn"
+                    onClick={handleSubmit}
+                    disabled={!answer.trim() || (submitted && !flashWrong)}
+                  >
+                    제출 ↵
+                  </button>
+                </div>
+                {submitted && !flashWrong && (
+                  <p className="submitted-hint">⏳ 판정 중... 다른 플레이어를 기다리세요</p>
+                )}
+                {flashWrong && (
+                  <p className="wrong-hint">❌ 틀렸습니다! 다시 시도해보세요.</p>
+                )}
+              </>
+            ) : (
+              <p className="waiting-next">⏳ 다음 라운드 준비 중...</p>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT: Timer */}
+        <div className="timer-panel glass-panel">
+          <div className="timer-label">남은 시간</div>
+          <TimerRing
+            timeLimit={state.timeLimit || 15}
+            active={roundActive && isPlaying}
+          />
+          <div className="timer-hint">빠를수록 유리!</div>
+        </div>
+
+      </div>
+    </div>
+  )
 }
-
-function checkEndOrNextRound(room) {
-  // 💡 [추가할 코드] 점수가 변동되었으니 모든 참가자의 현황판을 업데이트하라고 지시합니다!
-  io.to(room.code).emit('room_update', getRoomState(room));
-  
-  // Check if anyone reached target score
-  const winner = room.players.find(p => p.score >= room.targetScore);
-  if (winner || room.currentRound >= room.questions.length) {
-    endGame(room);
-  } else {
-    startRound(room);
-  }
-}
-
-function endGame(room) {
-  if (room.roundTimer) {
-    clearTimeout(room.roundTimer);
-    room.roundTimer = null;
-  }
-  if (room.hintTimer) {
-    clearTimeout(room.hintTimer);
-    room.hintTimer = null;
-  }
-
-  const finalScores = room.players
-    .map(p => ({ ...p }))
-    .sort((a, b) => b.score - a.score);
-
-  room.status = 'WAITING';
-  room.currentRound = 0;
-  room.players.forEach(p => { 
-    p.score = 0; 
-    p.isReady = false; 
-  });
-
-  io.to(room.code).emit('game_over', { 
-    winner: finalScores[0], 
-    finalScores: finalScores, 
-    roomCode: room.code 
-  });
-
-  setTimeout(() => {
-    io.to(room.code).emit('room_update', getRoomState(room));
-  }, 1000);
-}
-// ── Boot ──────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`🚀 Sound Quiz Server running on port ${PORT}`);
-  console.log(`   CLIENT_URL: ${CLIENT_URL}`);
-});
