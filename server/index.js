@@ -24,16 +24,12 @@ const io = new Server(server, {
 app.use(cors({ origin: CLIENT_URL }));
 app.use(express.json());
 
-// ── Health check ──────────────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 app.get('/', (_, res) => res.json({ name: 'Sound Quiz Show Server', version: '1.0.0' }));
 
 const { RAW_QUIZ_DATA } = require('./quizData');
-// ── In-memory state ───────────────────────────────────────────
-// rooms: Map<roomCode, Room>
 const rooms = new Map();
 
-// 내장 퀴즈 데이터. start_game은 이 정규화된 배열만 사용한다.
 const QUIZ_DATA = RAW_QUIZ_DATA.map(question => ({
   ...question,
   audioUrl: question.audioUrl || null,
@@ -44,8 +40,6 @@ const QUIZ_DATA = RAW_QUIZ_DATA.map(question => ({
 
 console.log(`총 ${QUIZ_DATA.length}개의 퀴즈 데이터를 성공적으로 불러왔습니다.`);
 console.log(`[Quiz] YouTube playable questions: ${getPlayableQuestions().length}/${QUIZ_DATA.length}`);
-
-// ── Utility functions ─────────────────────────────────────────
 
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -63,12 +57,8 @@ function getRandomQuestions(count = 10) {
   return shuffled.slice(0, Math.min(count, shuffled.length));
 }
 
-// Smart grading: normalise → exact match → similarity
 function normalise(text) {
-  return text
-    .toLowerCase()
-    .replace(/[\s\-_.,!?'"]/g, '')
-    .trim();
+  return text.toLowerCase().replace(/[\s\-_.,!?'"]/g, '').trim();
 }
 
 function levenshtein(a, b) {
@@ -78,9 +68,7 @@ function levenshtein(a, b) {
   );
   for (let i = 1; i <= m; i++)
     for (let j = 1; j <= n; j++)
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
   return dp[m][n];
 }
 
@@ -90,11 +78,7 @@ function smartGrade(submitted, answers) {
 
   for (const ans of answers) {
     const normAns = normalise(ans);
-
-    // Exact match
     if (normSubmit === normAns) return true;
-
-    // Similarity (Levenshtein)
     if (normAns.length >= 3) {
       const dist = levenshtein(normSubmit, normAns);
       const similarity = 1 - dist / Math.max(normAns.length, normSubmit.length);
@@ -118,29 +102,25 @@ function getRoomState(room) {
     status: room.status,
     currentRound: room.currentRound,
     totalRounds: room.totalRounds,
-    targetScore: room.targetScore
+    targetScore: room.targetScore,
+    isTimerRunning: !!room.roundTimer // 💡 핵심: 서버 타이머가 작동 중인지 프론트로 전송
   };
 }
-
-// ── Socket.io handlers ────────────────────────────────────────
 
 io.on('connection', (socket) => {
   console.log(`[CONNECT] ${socket.id}`);
 
-  // ── join_room ──────────────────────────────────────────────
   socket.on('join_room', ({ nickname, roomCode }, cb) => {
     try {
       let room;
       let isNewRoom = false;
 
       if (roomCode) {
-        // Join existing
         room = rooms.get(roomCode.toUpperCase());
         if (!room) return cb({ error: '존재하지 않는 방 코드입니다.' });
         if (room.status === 'PLAYING') return cb({ error: '이미 게임이 진행 중인 방입니다.' });
         if (room.players.length >= 8) return cb({ error: '방이 가득 찼습니다. (최대 8명)' });
       } else {
-        // Create new room
         let code;
         do { code = generateRoomCode(); } while (rooms.has(code));
         room = {
@@ -162,7 +142,6 @@ io.on('connection', (socket) => {
         isNewRoom = true;
       }
 
-      // Add player
       room.players.push({
         id: socket.id,
         nickname: nickname || `플레이어${room.players.length + 1}`,
@@ -176,14 +155,12 @@ io.on('connection', (socket) => {
 
       io.to(room.code).emit('room_update', getRoomState(room));
       cb({ success: true, roomCode: room.code, isHost: isNewRoom });
-      console.log(`[JOIN] ${nickname} → room ${room.code}`);
     } catch (e) {
       console.error(e);
       cb({ error: '서버 오류가 발생했습니다.' });
     }
   });
 
-  // ── start_game ─────────────────────────────────────────────
   socket.on('start_game', ({ targetScore = 5 }, cb) => {
     let room;
     try {
@@ -195,9 +172,7 @@ io.on('connection', (socket) => {
 
       const questions = getRandomQuestions(ROUND_COUNT);
       if (questions.length === 0) {
-        return cb?.({
-          error: '재생 가능한 문제가 없습니다. quizData.js를 확인해주세요.'
-        });
+        return cb?.({ error: '재생 가능한 문제가 없습니다. quizData.js를 확인해주세요.' });
       }
 
       room.isStarting = true;
@@ -221,7 +196,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── submit_answer ──────────────────────────────────────────
   socket.on('submit_answer', ({ answer }) => {
     try {
       const room = rooms.get(socket.data.roomCode);
@@ -230,7 +204,6 @@ io.on('connection', (socket) => {
       const player = room.players.find(p => p.id === socket.id);
       if (!player) return;
 
-      // Already someone answered correctly this round
       if (room.answeredThisRound) return;
 
       const question = room.questions[room.currentRound - 1];
@@ -251,7 +224,6 @@ io.on('connection', (socket) => {
           room.hintTimer = null;
         }
 
-        // Score: correct player +1
         player.score += 1;
         io.to(room.code).emit('room_update', getRoomState(room));
 
@@ -265,7 +237,6 @@ io.on('connection', (socket) => {
 
         setTimeout(() => checkEndOrNextRound(room), 2500);
       } else {
-        // Tell only this player it was wrong (화면 잠금 해제 역할)
         socket.emit('answer_result', {
           correct: false,
           playerId: socket.id,
@@ -277,8 +248,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── skip_round (NEW) ───────────────────────────────────────
-  // 클라이언트에서 20초 재생 실패 시 강제 스킵을 요청할 때 처리
   socket.on('skip_round', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
@@ -293,13 +262,14 @@ io.on('connection', (socket) => {
         room.hintTimer = null;
       }
 
-      room.answeredThisRound = true; // 강제 잠금 처리
+      room.answeredThisRound = true;
 
+      // 💡 에러 발생 시 UI 시스템에 자연스럽게 띄우도록 메시지 전송
       io.to(room.code).emit('answer_result', {
         correct: false,
         noWinner: true,
         answer: room.questions[room.currentRound - 1]?.answers[0] || '알 수 없음',
-        message: '음원 재생 지연으로 라운드를 스킵합니다.',
+        message: '영상을 재생할 수 없어 스킵했습니다.',
         scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
       });
 
@@ -309,8 +279,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── youtube_playing (NEW) ──────────────────────────────────
-  // 오디오가 정상적으로 재생되기 시작했을 때 서버 타이머 출발
   socket.on('youtube_playing', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
@@ -318,7 +286,6 @@ io.on('connection', (socket) => {
       if (room && room.status === 'PLAYING' && !room.roundTimer) {
         const question = room.questions[room.currentRound - 1];
         
-        // 10초 뒤 힌트 공개 타이머
         if (question && question.hint) {
           room.hintTimer = setTimeout(() => {
             if (room.status === 'PLAYING' && !room.answeredThisRound) {
@@ -327,31 +294,32 @@ io.on('connection', (socket) => {
           }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000); 
         }
 
-        // 15초 라운드 종료 타이머
         room.roundTimer = setTimeout(() => {
           room.hintTimer = null;
           if (!room.answeredThisRound) {
             room.answeredThisRound = true;
             
-            // 💡 상식적인 룰 적용: 타임아웃 시 아무도 점수를 얻지 못합니다! (everyone else +1 삭제됨)
+            // 💡 아무도 맞히지 못했을 때 깔끔하게 0점 처리 알림
             io.to(room.code).emit('answer_result', {
               correct: false,
               noWinner: true,
               answer: question.answers[0],
-              message: '시간 초과! 아무도 맞히지 못했습니다.',
+              message: '아무도 점수를 얻지 못했습니다 (0점)',
               scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
             });
 
             setTimeout(() => checkEndOrNextRound(room), 2500);
           }
         }, ROUND_TIME_LIMIT * 1000);
+
+        // 🚨 핵심: 서버 타이머가 출발했음을 전 클라이언트에 즉시 전송해 타이머 UI 강제 작동!
+        io.to(room.code).emit('room_update', getRoomState(room));
       }
     } catch (e) {
       console.error("Youtube Playing Error:", e);
     }
   });
 
-  // ── disconnect ─────────────────────────────────────────────
   socket.on('disconnect', () => {
     const roomCode = socket.data.roomCode;
     if (!roomCode) return;
@@ -360,17 +328,14 @@ io.on('connection', (socket) => {
     if (!room) return;
 
     room.players = room.players.filter(p => p.id !== socket.id);
-    console.log(`[LEAVE] ${socket.data.nickname} left room ${roomCode}`);
-
+    
     if (room.players.length === 0) {
       if (room.roundTimer) clearTimeout(room.roundTimer);
       if (room.hintTimer) clearTimeout(room.hintTimer);
       rooms.delete(roomCode);
-      console.log(`[DELETE] Room ${roomCode} removed`);
       return;
     }
 
-    // Transfer host if needed
     if (room.hostId === socket.id) {
       room.hostId = room.players[0].id;
       io.to(roomCode).emit('system_message', {
@@ -380,14 +345,11 @@ io.on('connection', (socket) => {
 
     io.to(roomCode).emit('room_update', getRoomState(room));
 
-    // If game in progress and only 1 player, end game
     if (room.status === 'PLAYING' && room.players.length < 1) {
       endGame(room);
     }
   });
 });
-
-// ── Game flow helpers ─────────────────────────────────────────
 
 function startRound(room) {
   if (room.roundTimer) clearTimeout(room.roundTimer);
@@ -415,12 +377,11 @@ function startRound(room) {
     timeLimit: ROUND_TIME_LIMIT
   });
 
-  // 🚨 [수정됨] 기존에 무조건 돌아가던 힌트 및 라운드 타이머는 삭제되었습니다.
-  // 프론트엔드에서 음원 재생이 확인되어 'youtube_playing' 신호가 오면 그때부터 시작됩니다.
+  // 새 라운드 시작 시에도 타이머가 멈춰있음을 모든 클라이언트에 확실히 동기화
+  io.to(room.code).emit('room_update', getRoomState(room));
 }
 
 function checkEndOrNextRound(room) {
-  // Check if anyone reached target score
   const winner = room.players.find(p => p.score >= room.targetScore);
   if (winner || room.currentRound >= room.questions.length) {
     endGame(room);
@@ -439,7 +400,6 @@ function endGame(room) {
     room.hintTimer = null;
   }
 
-  // 💡 [수정됨] 0점 초기화 버그 해결을 위해 플레이어 데이터를 완벽하게 복제(Deep Copy)합니다.
   const finalScores = room.players
     .map(p => ({ ...p }))
     .sort((a, b) => b.score - a.score);
@@ -454,13 +414,11 @@ function endGame(room) {
     roomCode: room.code
   });
 
-  // Reset room state for rematch
   setTimeout(() => {
     io.to(room.code).emit('room_update', getRoomState(room));
   }, 1000);
 }
 
-// ── Boot ──────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🚀 Sound Quiz Server running on port ${PORT}`);
