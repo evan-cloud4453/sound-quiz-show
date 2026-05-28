@@ -268,6 +268,7 @@ io.on('connection', (socket) => {
 
         // Score: correct player +1
         player.score += 1;
+        io.to(room.code).emit('room_update', getRoomState(room));
 
         io.to(room.code).emit('answer_result', {
           correct: true,
@@ -364,6 +365,9 @@ function startRound(room) {
 }
 
 function checkEndOrNextRound(room) {
+  // 💡 [추가할 코드] 점수가 변동되었으니 모든 참가자의 현황판을 업데이트하라고 지시합니다!
+  io.to(room.code).emit('room_update', getRoomState(room));
+  
   // Check if anyone reached target score
   const winner = room.players.find(p => p.score >= room.targetScore);
   if (winner || room.currentRound >= room.questions.length) {
