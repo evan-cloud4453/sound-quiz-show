@@ -182,6 +182,20 @@ io.on('connection', (socket) => {
       console.error(e);
       cb({ error: '서버 오류가 발생했습니다.' });
     }
+
+    socket.on('youtube_playing', () => {
+  const room = rooms.get(socket.data.roomCode);
+  // 방이 존재하고 아직 해당 라운드의 타이머가 돌지 않았을 때만 15초 시작
+  if (room && room.status === 'PLAYING' && !room.roundTimer) {
+    room.roundTimer = setTimeout(() => {
+      room.hintTimer = null;
+      if (!room.answeredThisRound) {
+        room.players.forEach(p => { p.score += 1; });
+      }
+      checkEndOrNextRound(room);
+    }, 15000);
+  }
+});
   });
 
   // ── start_game ─────────────────────────────────────────────
@@ -347,25 +361,6 @@ function startRound(room) {
       room.hintTimer = null;
     }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000);
   }
-
-  // Round timer
-  room.roundTimer = setTimeout(() => {
-    room.hintTimer = null;
-    if (!room.answeredThisRound) {
-      // No correct answer → everyone else gets +1 (original board game rule)
-      room.players.forEach(p => { p.score += 1; });
-
-      io.to(room.code).emit('answer_result', {
-        correct: false,
-        noWinner: true,
-        answer: question.answers[0],
-        message: '시간 초과! 모두에게 1점이 주어집니다.',
-        scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-      });
-
-      setTimeout(() => checkEndOrNextRound(room), 2500);
-    }
-  }, 15000);
 }
 
 function checkEndOrNextRound(room) {
