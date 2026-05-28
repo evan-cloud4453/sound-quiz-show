@@ -60,13 +60,18 @@ export default function GameScreen() {
     isTimerRunning
   } = state
 
+  // 🍎 [애플 권한 탈취용 핵심 상태]
+  const [soundUnlocked, setSoundUnlocked] = useState(false)
+  const isUnlockingRef = useRef(false)
+  const isPlayingRef = useRef(false)
+
   const [answer, setAnswer] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
   const [timerActive, setTimerActive] = useState(false)
   const [mediaLoaded, setMediaLoaded] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [flashWrong, setFlashWrong] = useState(false)
-  const [phaseLabel, setPhaseLabel] = useState('다음 라운드 준비 중...')
+  const [phaseLabel, setPhaseLabel] = useState('시스템 접속 대기 중...')
   const [showResult, setShowResult] = useState(false)
   const [playbackBlocked, setPlaybackBlocked] = useState(false)
   const [playbackError, setPlaybackError] = useState(false)
@@ -80,7 +85,10 @@ export default function GameScreen() {
   const audioStopTimerRef = useRef(null)
   const tickTimersRef = useRef([])
 
-  // 💡 Web Audio API 기반의 무결점 째깍째깍 사운드 합성 오실레이터
+  // 💡 [이벤트 핸들러 최신 상태 참조용 레퍼런스]
+  const stateChangeHandlerRef = useRef()
+
+  // 째깍 사운드 신디사이저
   const playTickSound = useCallback(() => {
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext
@@ -88,20 +96,16 @@ export default function GameScreen() {
       const ctx = new AudioContext()
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
-      
       osc.type = 'sine'
-      osc.frequency.setValueAtTime(850, ctx.currentTime) // 깔끔하고 경쾌한 메트로놈 피치
-      
+      osc.frequency.setValueAtTime(850, ctx.currentTime)
       gain.gain.setValueAtTime(0.15, ctx.currentTime)
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
-      
       osc.connect(gain)
       gain.connect(ctx.destination)
-      
       osc.start()
       osc.stop(ctx.currentTime + 0.05)
     } catch (e) {
-      console.error("Audio Tick Error:", e)
+      console.error("Tick Sound Error:", e)
     }
   }, [])
 
@@ -110,217 +114,183 @@ export default function GameScreen() {
     tickTimersRef.current = []
   }, [])
 
-  const playYouTube = useCallback(() => {
-    const player = playerRef.current
-    if (!player || !youtubeId) return
+  // 🍎 1단계: 플레이어 최초 입장 시 더미(빈) 플레이어를 미리 깔아둠 (Persistent Player)
+  useEffect(() => {
+    let cancelled = false;
+    loadYouTubeApi().then(YT => {
+      if (cancelled) return;
+      playerRef.current = new YT.Player(playerHostIdRef.current, {
+        width: 220, height: 200,
+        videoId: 'jNQXAC9IVRw', // 더미 영상 (코끼리 영상)
+        playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, playsinline: 1, rel: 0 },
+        events: {
+          onReady: () => setMediaLoaded(true),
+          onStateChange: (event) => stateChangeHandlerRef.current?.(event),
+          onError: () => {
+            if (isUnlockingRef.current) return; // 권한 탈취 중 에러는 자연스럽게 무시
+            clearTimeout(failSafeTimerRef.current);
+            clearTimeout(audioStopTimerRef.current);
+            clearTickTimers();
+            setIsPlaying(false);
+            emit('skip_round');
+          }
+        }
+      });
+    });
+    return () => { cancelled = true; playerRef.current?.destroy?.(); }
+  }, [emit, clearTickTimers]);
 
+  // 🍎 2단계: 터치 유도 및 권한 강제 탈취 핸들러
+  const handleUnlock = () => {
+    setSoundUnlocked(true);
+    isUnlockingRef.current = true;
+
+    // Web Audio API 잠금 해제 (묵음 출력)
     try {
-      player.playVideo()
-      setPlaybackBlocked(false)
-      setPlaybackError(false)
-      setPhaseLabel('소리를 들어보세요!')
-    } catch (error) {
-      setPlaybackBlocked(true)
-      setPhaseLabel('재생 버튼을 눌러주세요')
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (AudioContext) {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 1;
+        gain.gain.value = 0.01;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(0);
+        osc.stop(0.1);
+      }
+    } catch(e) {}
+
+    // YouTube IFrame 권한 해제 (터치 이벤트 내에서 강제 play 호출)
+    if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
+      playerRef.current.playVideo();
     }
-  }, [youtubeId])
+  };
 
-  useEffect(() => {
-    return () => {
-      try {
-        playerRef.current?.destroy?.()
-      } catch (error) {}
-      playerRef.current = null
+  // 🍎 3단계: 상태 감지 및 서버 전송 (Ref를 통해 최신 함수 유지)
+  stateChangeHandlerRef.current = (event) => {
+    // 권한 탈취용 더미 재생이었다면 즉시 멈추고 입 싹 닦기!
+    if (isUnlockingRef.current && event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
+      try { playerRef.current?.pauseVideo?.(); } catch(e){}
+      isUnlockingRef.current = false;
+      return;
     }
-  }, [])
 
+    if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
+      clearTimeout(failSafeTimerRef.current);
+      setIsPlaying(true);
+      setTimerActive(true);
+      setPlaybackBlocked(false);
+      setPlaybackError(false);
+      setPhaseLabel('소리를 들어보세요!');
+
+      if (!isPlayingRef.current) {
+        isPlayingRef.current = true;
+        emit('youtube_playing');
+      }
+
+      clearTimeout(audioStopTimerRef.current);
+      audioStopTimerRef.current = setTimeout(() => {
+        try { playerRef.current?.pauseVideo?.(); } catch (e) {}
+        setIsPlaying(false);
+        
+        clearTickTimers();
+        for (let i = 0; i < 5; i++) {
+          tickTimersRef.current.push(setTimeout(() => playTickSound(), i * 1000));
+        }
+      }, 10000);
+    }
+
+    if (event.data === YOUTUBE_PLAYER_STATE.PAUSED || event.data === YOUTUBE_PLAYER_STATE.ENDED) {
+      if (!isUnlockingRef.current) setIsPlaying(false);
+    }
+  };
+
+  // 🍎 4단계: 진짜 라운드 시작 로직 (soundUnlocked가 true일 때만 가동)
   useEffect(() => {
-    const roundToken = roundTokenRef.current + 1
-    roundTokenRef.current = roundToken
+    if (!roundActive || !soundUnlocked) return;
 
-    setAnswer('')
-    setSubmitted(false)
-    setFlashWrong(false)
-    setIsPlaying(false)
-    setTimerActive(false)
-    setMediaLoaded(false)
-    setShowResult(false)
-    setPlaybackBlocked(false)
-    setPlaybackError(false)
-    setPhaseLabel('YouTube 플레이어 준비 중...')
+    const roundToken = roundTokenRef.current + 1;
+    roundTokenRef.current = roundToken;
 
-    clearTimeout(failSafeTimerRef.current)
-    clearTimeout(audioStopTimerRef.current)
-    clearTickTimers()
+    setAnswer('');
+    setSubmitted(false);
+    setFlashWrong(false);
+    setIsPlaying(false);
+    isPlayingRef.current = false;
+    isUnlockingRef.current = false; // 혹시 꼬인 락 초기화
+    setTimerActive(false);
+    setShowResult(false);
+    setPlaybackBlocked(false);
+    setPlaybackError(false);
+    setPhaseLabel('오디오 세팅 중...');
+
+    clearTimeout(failSafeTimerRef.current);
+    clearTimeout(audioStopTimerRef.current);
+    clearTickTimers();
 
     if (!youtubeId) {
-      setMediaLoaded(true)
-      if (currentRound > 0) {
-        setPlaybackError(true)
-        emit('skip_round') // 영상 ID가 비어있다면 지연 없이 즉시 폭풍 스킵!
-      } else {
-        setPhaseLabel('다음 라운드 준비 중...')
-      }
-      return undefined
+      emit('skip_round'); // ID 없으면 다이렉트 스킵
+      return;
     }
 
-    // 로딩 무한 지연을 막기 위한 클라이언트 방어막 타이머 (10초)
     failSafeTimerRef.current = setTimeout(() => {
-      setIsPlaying(false)
-      setTimerActive(false)
-      emit('skip_round')
-    }, 10000)
+      setIsPlaying(false);
+      setTimerActive(false);
+      emit('skip_round');
+    }, 10000);
 
-    let cancelled = false
-    const startSeconds = Number(youtubeStart) || 0
-    const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0)
+    const startSeconds = Number(youtubeStart) || 0;
+    const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
 
-    const loadClip = (player) => {
-      if (cancelled || roundTokenRef.current !== roundToken) return
-
-      setMediaLoaded(true)
-      setPhaseLabel('소리를 들어보세요!')
-      player.loadVideoById({
-        videoId: youtubeId,
-        startSeconds,
-        endSeconds
-      })
+    // 💡 이미 만들어둔 플레이어에 진짜 영상을 덮어씌우고 재생!
+    if (playerRef.current?.loadVideoById) {
+      playerRef.current.loadVideoById({ videoId: youtubeId, startSeconds, endSeconds });
       setTimeout(() => {
-        if (!cancelled && roundTokenRef.current === roundToken) playYouTube()
-      }, 150)
-    }
-
-    loadYouTubeApi()
-      .then(YT => {
-        if (cancelled || roundTokenRef.current !== roundToken) return
-
-        if (playerRef.current?.loadVideoById) {
-          loadClip(playerRef.current)
-          return
+        if (roundTokenRef.current === roundToken) {
+          try { playerRef.current?.playVideo(); } catch(e){}
         }
-
-        playerRef.current = new YT.Player(playerHostIdRef.current, {
-          width: 220,
-          height: 200,
-          videoId: youtubeId,
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            disablekb: 1,
-            fs: 0,
-            iv_load_policy: 3,
-            playsinline: 1,
-            rel: 0,
-            start: Math.floor(startSeconds),
-            end: Math.floor(endSeconds),
-            origin: window.location.origin
-          },
-          events: {
-            onReady: event => loadClip(event.target),
-            onStateChange: event => {
-              if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
-                clearTimeout(failSafeTimerRef.current)
-
-                setIsPlaying(true)
-                setTimerActive(true)
-                setPlaybackBlocked(false)
-                setPlaybackError(false)
-                setPhaseLabel('소리를 들어보세요!')
-                emit('youtube_playing')
-
-                clearTimeout(audioStopTimerRef.current)
-                // 10초 소리 재생 후 정지 및 나머지 5초 째깍째깍 기동!
-                audioStopTimerRef.current = setTimeout(() => {
-                  try { playerRef.current?.pauseVideo?.() } catch (e) {}
-                  setIsPlaying(false)
-                  
-                  clearTickTimers()
-                  // 남은 5초 동안 1초 간격으로 정확히 5번 째깍 사운드 런칭
-                  for (let i = 0; i < 5; i++) {
-                    tickTimersRef.current.push(
-                      setTimeout(() => {
-                        playTickSound()
-                      }, i * 1000)
-                    )
-                  }
-                }, 10000)
-              }
-              if (event.data === YOUTUBE_PLAYER_STATE.PAUSED || event.data === YOUTUBE_PLAYER_STATE.ENDED) {
-                setIsPlaying(false)
-              }
-            },
-            // 🚨 유튜브 재생 제한 등의 에러 감지 시 어떤 지연이나 문구 출력도 없이 0.1초 만에 스킵 신호 발사!
-            onError: () => {
-              clearTimeout(failSafeTimerRef.current)
-              clearTimeout(audioStopTimerRef.current)
-              clearTickTimers()
-              setIsPlaying(false)
-              emit('skip_round') 
-            },
-            onAutoplayBlocked: () => {
-              setMediaLoaded(true)
-              setIsPlaying(false)
-              setPlaybackBlocked(true)
-              setPhaseLabel('재생 버튼을 눌러주세요')
-            }
-          }
-        })
-      })
-      .catch(() => {
-        setIsPlaying(false)
-        emit('skip_round')
-      })
-
-    return () => {
-      cancelled = true
-      clearTimeout(failSafeTimerRef.current)
-      clearTimeout(audioStopTimerRef.current)
-      clearTickTimers()
-      try {
-        playerRef.current?.stopVideo?.()
-      } catch (error) {}
+      }, 150);
     }
-  }, [youtubeId, youtubeStart, youtubeEnd, currentRound, playYouTube, emit, playTickSound, clearTickTimers])
+  }, [roundActive, youtubeId, youtubeStart, youtubeEnd, soundUnlocked, emit, clearTickTimers]);
 
   useEffect(() => {
-    if (roundActive && inputRef.current) {
+    if (roundActive && soundUnlocked && inputRef.current) {
       setTimeout(() => inputRef.current?.focus(), 300)
     }
-  }, [roundActive])
+  }, [roundActive, soundUnlocked])
 
   useEffect(() => {
     if (!roundActive) {
-      setTimerActive(false)
-      clearTimeout(failSafeTimerRef.current)
-      clearTimeout(audioStopTimerRef.current)
-      clearTickTimers()
+      setTimerActive(false);
+      clearTimeout(failSafeTimerRef.current);
+      clearTimeout(audioStopTimerRef.current);
+      clearTickTimers();
     }
   }, [roundActive, clearTickTimers])
 
   useEffect(() => {
     if (lastResult) {
-      const isRoundResult = lastResult.correct || lastResult.noWinner || lastResult.winnerId
-      if (!isRoundResult) return undefined
+      const isRoundResult = lastResult.correct || lastResult.noWinner || lastResult.winnerId;
+      if (!isRoundResult) return undefined;
 
-      try {
-        playerRef.current?.pauseVideo?.()
-      } catch (error) {}
+      try { playerRef.current?.pauseVideo?.(); } catch (error) {}
       
-      setIsPlaying(false)
-      clearTickTimers() // 정답자가 선점했거나 라운드 타임오버가 확정되면 째깍 사운드 즉시 폐기
+      setIsPlaying(false);
+      clearTickTimers(); 
 
-      setShowResult(true)
-      setPhaseLabel(lastResult.correct ? '🎉 정답!' : '⏰ 라운드 종료!')
-      const t = setTimeout(() => setShowResult(false), 2500)
-      return () => clearTimeout(t)
+      setShowResult(true);
+      setPhaseLabel(lastResult.correct ? '🎉 정답!' : '⏰ 라운드 종료!');
+      const t = setTimeout(() => setShowResult(false), 2500);
+      return () => clearTimeout(t);
     }
-    return undefined
+    return undefined;
   }, [lastResult, clearTickTimers])
 
   const handleSubmit = useCallback(() => {
-    if (!answer.trim() || submitted || !roundActive) return
-    setSubmitted(true)
-    submitAnswer(answer.trim())
+    if (!answer.trim() || submitted || !roundActive) return;
+    setSubmitted(true);
+    submitAnswer(answer.trim());
   }, [answer, submitted, roundActive, submitAnswer])
 
   const handleKey = (e) => {
@@ -329,11 +299,11 @@ export default function GameScreen() {
 
   useEffect(() => {
     if (lastResult && !lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) {
-      setSubmitted(false) 
-      setAnswer('')
-      setFlashWrong(true)
-      setTimeout(() => setFlashWrong(false), 600)
-      inputRef.current?.focus()
+      setSubmitted(false);
+      setAnswer('');
+      setFlashWrong(true);
+      setTimeout(() => setFlashWrong(false), 600);
+      inputRef.current?.focus();
     }
   }, [lastResult])
 
@@ -342,6 +312,24 @@ export default function GameScreen() {
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
+
+      {/* 🍎 애플(iOS) 권한 강제 탈취용 오버레이 게이트 */}
+      {!soundUnlocked && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+          backgroundColor: 'rgba(9, 9, 11, 0.95)', zIndex: 99999,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          color: '#fff', cursor: 'pointer', backdropFilter: 'blur(15px)'
+        }} onClick={handleUnlock}>
+          <div style={{ fontSize: '5rem', marginBottom: '20px', animation: 'bounce 1s infinite' }}>👆</div>
+          <h2 style={{ fontSize: '2rem', color: '#06b6d4', textShadow: '0 0 15px rgba(6,182,212,0.6)', textAlign: 'center', wordBreak: 'keep-all', padding: '0 20px' }}>
+            화면을 터치해서 접속하세요
+          </h2>
+          <p style={{ marginTop: '15px', color: '#94a3b8', fontSize: '1.1rem', textAlign: 'center' }}>
+            모바일 기기 정책으로 인해 터치 후 오디오 시스템이 연결됩니다.
+          </p>
+        </div>
+      )}
 
       {showResult && lastResult && (
         <div className={`result-overlay ${lastResult.correct || lastResult.noWinner ? 'show' : ''}`}>
@@ -369,7 +357,6 @@ export default function GameScreen() {
       )}
 
       <div className="game-layout">
-
         <div className="scoreboard-panel glass-panel">
           <div className="scoreboard-title">🏆 스코어보드</div>
           <div className="score-list">
@@ -396,7 +383,6 @@ export default function GameScreen() {
         </div>
 
         <div className="game-center">
-
           <div className="round-progress">
             <div className="round-info">
               <span className="glow-cyan">라운드 {currentRound}</span>
@@ -429,11 +415,7 @@ export default function GameScreen() {
                     <span>사운드 로딩 중...</span>
                   </div>
                 )}
-                {playbackBlocked && (
-                  <button className="btn btn-secondary audio-play-btn" onClick={playYouTube}>
-                    ▶ 재생
-                  </button>
-                )}
+                {/* 💡 마개조 완수로 인해 더 이상 못생긴 수동 재생 버튼은 필요 없습니다! */}
                 {playbackError && (
                   <div className="audio-error">YouTube 영상을 재생할 수 없습니다.</div>
                 )}
@@ -487,7 +469,6 @@ export default function GameScreen() {
           />
           <div className="timer-hint">빠를수록 유리!</div>
         </div>
-
       </div>
     </div>
   )
