@@ -78,9 +78,9 @@ export default function GameScreen() {
 
   const failSafeTimerRef = useRef(null)
   const audioStopTimerRef = useRef(null)
-  const tickTimersRef = useRef([]) // 💡 째깍째깍 타이머들을 청소하기 위한 배열 레퍼런스
+  const tickTimersRef = useRef([])
 
-  // 💡 Web Audio API를 활용한 무결점 째깍째깍 전자 음원 합성기
+  // 💡 Web Audio API 기반의 무결점 째깍째깍 사운드 합성 오실레이터
   const playTickSound = useCallback(() => {
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext
@@ -90,18 +90,18 @@ export default function GameScreen() {
       const gain = ctx.createGain()
       
       osc.type = 'sine'
-      osc.frequency.setValueAtTime(900, ctx.currentTime) // 900Hz의 경쾌한 틱 사운드
+      osc.frequency.setValueAtTime(850, ctx.currentTime) // 깔끔하고 경쾌한 메트로놈 피치
       
-      gain.gain.setValueAtTime(0.12, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.04) // 아주 짧은 끊김 연출
+      gain.gain.setValueAtTime(0.15, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
       
       osc.connect(gain)
       gain.connect(ctx.destination)
       
       osc.start()
-      osc.stop(ctx.currentTime + 0.04)
+      osc.stop(ctx.currentTime + 0.05)
     } catch (e) {
-      console.error("Tick Sound Synthesis Error:", e)
+      console.error("Audio Tick Error:", e)
     }
   }, [])
 
@@ -157,14 +157,14 @@ export default function GameScreen() {
       setMediaLoaded(true)
       if (currentRound > 0) {
         setPlaybackError(true)
-        emit('skip_round') // 영상 ID 누락 시 지연 없이 즉시 서버에 패스 신호 송신
+        emit('skip_round') // 영상 ID가 비어있다면 지연 없이 즉시 폭풍 스킵!
       } else {
         setPhaseLabel('다음 라운드 준비 중...')
       }
       return undefined
     }
 
-    // 재생 지연 무한 버퍼링 방지용 10초 세이프티 가드
+    // 로딩 무한 지연을 막기 위한 클라이언트 방어막 타이머 (10초)
     failSafeTimerRef.current = setTimeout(() => {
       setIsPlaying(false)
       setTimerActive(false)
@@ -186,7 +186,7 @@ export default function GameScreen() {
         endSeconds
       })
       setTimeout(() => {
-        if (!cancelled && roundTokenRef.current !== roundToken) playYouTube()
+        if (!cancelled && roundTokenRef.current === roundToken) playYouTube()
       }, 150)
     }
 
@@ -229,13 +229,13 @@ export default function GameScreen() {
                 emit('youtube_playing')
 
                 clearTimeout(audioStopTimerRef.current)
-                // 정확히 10초 재생 후 음원 정지 및 남은 5초간 째깍째깍 구동
+                // 10초 소리 재생 후 정지 및 나머지 5초 째깍째깍 기동!
                 audioStopTimerRef.current = setTimeout(() => {
                   try { playerRef.current?.pauseVideo?.() } catch (e) {}
                   setIsPlaying(false)
                   
-                  // 💡 째깍째깍 루프 기동 (10초 끝난 직후부터 1초 간격으로 총 5번 재생)
                   clearTickTimers()
+                  // 남은 5초 동안 1초 간격으로 정확히 5번 째깍 사운드 런칭
                   for (let i = 0; i < 5; i++) {
                     tickTimersRef.current.push(
                       setTimeout(() => {
@@ -249,7 +249,7 @@ export default function GameScreen() {
                 setIsPlaying(false)
               }
             },
-            // 🚨 재생 불가 에러 발생 시 안내 팝업이나 문구 출력 없이 즉시 0.1초 만에 다음 문제 스킵
+            // 🚨 유튜브 재생 제한 등의 에러 감지 시 어떤 지연이나 문구 출력도 없이 0.1초 만에 스킵 신호 발사!
             onError: () => {
               clearTimeout(failSafeTimerRef.current)
               clearTimeout(audioStopTimerRef.current)
@@ -307,7 +307,7 @@ export default function GameScreen() {
       } catch (error) {}
       
       setIsPlaying(false)
-      clearTickTimers() // 정답자가 나오거나 라운드가 만료되면 째깍째깍 즉시 중단
+      clearTickTimers() // 정답자가 선점했거나 라운드 타임오버가 확정되면 째깍 사운드 즉시 폐기
 
       setShowResult(true)
       setPhaseLabel(lastResult.correct ? '🎉 정답!' : '⏰ 라운드 종료!')
