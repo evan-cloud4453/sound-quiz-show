@@ -80,12 +80,12 @@ export default function GameScreen() {
   const playerHostIdRef = useRef(`Youtubeer-${Math.random().toString(36).slice(2)}`)
   const roundTokenRef = useRef(0)
 
+  const failSafeTimerRef = useRef(null)
   const audioStopTimerRef = useRef(null)
   const tickTimersRef = useRef([])
 
   const stateChangeHandlerRef = useRef()
 
-  // Web Audio API 기본 탑재 째깍째깍 사운드
   const playTickSound = useCallback(() => {
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext
@@ -101,9 +101,7 @@ export default function GameScreen() {
       gain.connect(ctx.destination)
       osc.start()
       osc.stop(ctx.currentTime + 0.05)
-    } catch (e) {
-      console.error("Tick Sound Error:", e)
-    }
+    } catch (e) {}
   }, [])
 
   const clearTickTimers = useCallback(() => {
@@ -126,7 +124,7 @@ export default function GameScreen() {
             if (isUnlockingRef.current) return; 
             clearTickTimers();
             setIsPlaying(false);
-            emit('skip_round'); // 재생 불가능할 때만 서버에 조용히 보고
+            emit('skip_round');
           }
         }
       });
@@ -166,6 +164,7 @@ export default function GameScreen() {
     }
 
     if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
+      clearTimeout(failSafeTimerRef.current);
       setIsPlaying(true);
       setTimerActive(true);
       setPlaybackBlocked(false);
@@ -212,6 +211,7 @@ export default function GameScreen() {
     setPlaybackError(false);
     setPhaseLabel('오디오 세팅 중...');
 
+    clearTimeout(failSafeTimerRef.current);
     clearTimeout(audioStopTimerRef.current);
     clearTickTimers();
 
@@ -219,6 +219,13 @@ export default function GameScreen() {
       emit('skip_round');
       return;
     }
+
+    // 🚨 [핵심 2] 클라이언트 3.5초 자비 없는 단두대 타이머 장착!
+    failSafeTimerRef.current = setTimeout(() => {
+      setIsPlaying(false);
+      setTimerActive(false);
+      emit('skip_round');
+    }, 3500); // 10초 대기를 3.5초로 팍 줄여버림
 
     const startSeconds = Number(youtubeStart) || 0;
     const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
@@ -242,6 +249,7 @@ export default function GameScreen() {
   useEffect(() => {
     if (!roundActive) {
       setTimerActive(false);
+      clearTimeout(failSafeTimerRef.current);
       clearTimeout(audioStopTimerRef.current);
       clearTickTimers();
     }
