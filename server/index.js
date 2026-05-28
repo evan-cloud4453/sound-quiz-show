@@ -4,6 +4,20 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
+const Question = require('./models/Question');
+
+async function setupRoomQuestions(room) {
+  try {
+    // DB에서 랜덤하게 10개의 문제를 뽑아옵니다.
+    const randomQuestions = await Question.aggregate([{ $sample: { size: 10 } }]);
+    
+    // 뽑아온 문제를 방 데이터에 할당
+    room.questions = randomQuestions;
+    room.currentRound = 1;
+  } catch (error) {
+    console.error("DB에서 문제를 가져오는데 실패했습니다:", error);
+  }
+}
 
 const app = express();
 const server = http.createServer(app);
