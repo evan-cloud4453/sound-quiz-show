@@ -103,7 +103,7 @@ function getRoomState(room) {
     currentRound: room.currentRound,
     totalRounds: room.totalRounds,
     targetScore: room.targetScore,
-    isTimerRunning: !!room.roundTimer // 💡 핵심: 서버 타이머가 작동 중인지 프론트로 전송
+    isTimerRunning: !!room.roundTimer
   };
 }
 
@@ -248,6 +248,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // 🚨 재생 불가 시 불필요한 전송 문구 처리 없이 다이렉트로 다음 방 전환 연출 트리거
   socket.on('skip_round', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
@@ -263,17 +264,7 @@ io.on('connection', (socket) => {
       }
 
       room.answeredThisRound = true;
-
-      // 💡 에러 발생 시 UI 시스템에 자연스럽게 띄우도록 메시지 전송
-      io.to(room.code).emit('answer_result', {
-        correct: false,
-        noWinner: true,
-        answer: room.questions[room.currentRound - 1]?.answers[0] || '알 수 없음',
-        message: '영상을 재생할 수 없어 스킵했습니다.',
-        scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-      });
-
-      setTimeout(() => checkEndOrNextRound(room), 2500);
+      checkEndOrNextRound(room); // 대기 연출 없이 완전 다이렉트로 전환
     } catch (e) {
       console.error("Skip Round Error:", e);
     }
@@ -294,15 +285,15 @@ io.on('connection', (socket) => {
           }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000); 
         }
 
-        // 💡 타이머 내부에 완벽한 try...catch 방어막 구축!
+        // 💡 0초 정지 버그를 뚫어내는 무적의 비동기 타임아웃 쉴드
         room.roundTimer = setTimeout(() => {
           try {
             room.hintTimer = null;
             if (!room.answeredThisRound) {
               room.answeredThisRound = true;
               
-              // 에러가 나도 절대 멈추지 않도록 옵셔널 체이닝(?.) 적용
-              const answerText = question?.answers?.[0] || '알 수 없음';
+              const currentQuestion = room.questions[room.currentRound - 1];
+              const answerText = currentQuestion?.answers?.[0] || '알 수 없음';
 
               io.to(room.code).emit('answer_result', {
                 correct: false,
@@ -312,12 +303,14 @@ io.on('connection', (socket) => {
                 scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
               });
 
-              setTimeout(() => checkEndOrNextRound(room), 2500);
+              // 확실하게 타임아웃 2.5초 뒤 다음 맵핑 진행
+              setTimeout(() => {
+                try { checkEndOrNextRound(room); } catch (e) { console.error(e); }
+              }, 2500);
             }
           } catch (timerError) {
-            console.error("타이머 콜백 에러 발생 (방어 완료):", timerError);
-            // 에러가 발생해도 게임이 멈추지 않도록 억지로 다음 라운드 강제 호출!
-            setTimeout(() => checkEndOrNextRound(room), 2500);
+            console.error("타이머 내부 동작 치명적 에러 캐치:", timerError);
+            setTimeout(() => checkEndOrNextRound(room), 100);
           }
         }, ROUND_TIME_LIMIT * 1000);
 
@@ -360,33 +353,35 @@ io.on('connection', (socket) => {
 });
 
 function startRound(room) {
-  if (room.roundTimer) clearTimeout(room.roundTimer);
-  if (room.hintTimer) clearTimeout(room.hintTimer);
-  room.roundTimer = null;
-  room.hintTimer = null;
+  try {
+    if (room.roundTimer) clearTimeout(room.roundTimer);
+    if (room.hintTimer) clearTimeout(room.hintTimer);
+    room.roundTimer = null;
+    room.hintTimer = null;
 
-  room.currentRound += 1;
-  room.answeredThisRound = false;
-  room.firstCorrectPlayerId = null;
+    room.currentRound += 1;
+    room.answeredThisRound = false;
+    room.firstCorrectPlayerId = null;
 
-  const question = room.questions[room.currentRound - 1];
-  if (!question) return endGame(room);
+    const question = room.questions[room.currentRound - 1];
+    if (!question) return endGame(room);
 
-  const roundNumber = room.currentRound;
+    io.to(room.code).emit('round_start', {
+      round: room.currentRound,
+      totalRounds: room.questions.length,
+      category: question.category,
+      audioUrl: question.audioUrl,
+      youtubeId: question.youtubeId,
+      youtubeStart: question.youtubeStart,
+      youtubeEnd: question.youtubeEnd,
+      timeLimit: ROUND_TIME_LIMIT
+    });
 
-  io.to(room.code).emit('round_start', {
-    round: roundNumber,
-    totalRounds: room.questions.length,
-    category: question.category,
-    audioUrl: question.audioUrl,
-    youtubeId: question.youtubeId,
-    youtubeStart: question.youtubeStart,
-    youtubeEnd: question.youtubeEnd,
-    timeLimit: ROUND_TIME_LIMIT
-  });
-
-  // 새 라운드 시작 시에도 타이머가 멈춰있음을 모든 클라이언트에 확실히 동기화
-  io.to(room.code).emit('room_update', getRoomState(room));
+    io.to(room.code).emit('room_update', getRoomState(room));
+  } catch (err) {
+    console.error("라운드 시작 도중 에러 방어:", err);
+    endGame(room);
+  }
 }
 
 function checkEndOrNextRound(room) {
@@ -398,39 +393,42 @@ function checkEndOrNextRound(room) {
       startRound(room);
     }
   } catch (error) {
-    console.error("라운드 전환 에러 발생 (강제 종료 처리):", error);
-    // 무한 0초 정지를 막기 위해, 최악의 에러 시 방을 대기 상태로 강제 전환
+    console.error("라운드 변환 도중 0초 고정 방어:", error);
     endGame(room);
   }
 }
 
 function endGame(room) {
-  if (room.roundTimer) {
-    clearTimeout(room.roundTimer);
-    room.roundTimer = null;
+  try {
+    if (room.roundTimer) {
+      clearTimeout(room.roundTimer);
+      room.roundTimer = null;
+    }
+    if (room.hintTimer) {
+      clearTimeout(room.hintTimer);
+      room.hintTimer = null;
+    }
+
+    const finalScores = room.players
+      .map(p => ({ ...p }))
+      .sort((a, b) => b.score - a.score);
+
+    room.status = 'WAITING';
+    room.currentRound = 0;
+    room.players.forEach(p => { p.score = 0; p.isReady = false; });
+
+    io.to(room.code).emit('game_over', {
+      winner: finalScores[0],
+      finalScores: finalScores,
+      roomCode: room.code
+    });
+
+    setTimeout(() => {
+      io.to(room.code).emit('room_update', getRoomState(room));
+    }, 1000);
+  } catch (err) {
+    console.error("엔드게임 예외 핸들링:", err);
   }
-  if (room.hintTimer) {
-    clearTimeout(room.hintTimer);
-    room.hintTimer = null;
-  }
-
-  const finalScores = room.players
-    .map(p => ({ ...p }))
-    .sort((a, b) => b.score - a.score);
-
-  room.status = 'WAITING';
-  room.currentRound = 0;
-  room.players.forEach(p => { p.score = 0; p.isReady = false; });
-
-  io.to(room.code).emit('game_over', {
-    winner: finalScores[0],
-    finalScores: finalScores,
-    roomCode: room.code
-  });
-
-  setTimeout(() => {
-    io.to(room.code).emit('room_update', getRoomState(room));
-  }, 1000);
 }
 
 const PORT = process.env.PORT || 3001;
