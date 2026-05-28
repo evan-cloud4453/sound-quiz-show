@@ -57,7 +57,7 @@ export default function GameScreen() {
     currentRound, totalRounds, category, hint,
     youtubeId, youtubeStart, youtubeEnd,
     roundActive, lastResult, targetScore,
-    isTimerRunning // 💡 서버에서 보내주는 글로벌 타이머 작동 신호!
+    isTimerRunning
   } = state
 
   const [answer, setAnswer] = useState('')
@@ -76,7 +76,39 @@ export default function GameScreen() {
   const playerHostIdRef = useRef(`Youtubeer-${Math.random().toString(36).slice(2)}`)
   const roundTokenRef = useRef(0)
 
+  const failSafeTimerRef = useRef(null)
   const audioStopTimerRef = useRef(null)
+  const tickTimersRef = useRef([]) // 💡 째깍째깍 타이머들을 청소하기 위한 배열 레퍼런스
+
+  // 💡 Web Audio API를 활용한 무결점 째깍째깍 전자 음원 합성기
+  const playTickSound = useCallback(() => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext
+      if (!AudioContext) return
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(900, ctx.currentTime) // 900Hz의 경쾌한 틱 사운드
+      
+      gain.gain.setValueAtTime(0.12, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.04) // 아주 짧은 끊김 연출
+      
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      
+      osc.start()
+      osc.stop(ctx.currentTime + 0.04)
+    } catch (e) {
+      console.error("Tick Sound Synthesis Error:", e)
+    }
+  }, [])
+
+  const clearTickTimers = useCallback(() => {
+    tickTimersRef.current.forEach(t => clearTimeout(t))
+    tickTimersRef.current = []
+  }, [])
 
   const playYouTube = useCallback(() => {
     const player = playerRef.current
@@ -117,18 +149,27 @@ export default function GameScreen() {
     setPlaybackError(false)
     setPhaseLabel('YouTube 플레이어 준비 중...')
 
+    clearTimeout(failSafeTimerRef.current)
     clearTimeout(audioStopTimerRef.current)
+    clearTickTimers()
 
     if (!youtubeId) {
       setMediaLoaded(true)
       if (currentRound > 0) {
         setPlaybackError(true)
-        setPhaseLabel('YouTube 영상이 설정되지 않았습니다')
+        emit('skip_round') // 영상 ID 누락 시 지연 없이 즉시 서버에 패스 신호 송신
       } else {
         setPhaseLabel('다음 라운드 준비 중...')
       }
       return undefined
     }
+
+    // 재생 지연 무한 버퍼링 방지용 10초 세이프티 가드
+    failSafeTimerRef.current = setTimeout(() => {
+      setIsPlaying(false)
+      setTimerActive(false)
+      emit('skip_round')
+    }, 10000)
 
     let cancelled = false
     const startSeconds = Number(youtubeStart) || 0
@@ -145,7 +186,7 @@ export default function GameScreen() {
         endSeconds
       })
       setTimeout(() => {
-        if (!cancelled && roundTokenRef.current === roundToken) playYouTube()
+        if (!cancelled && roundTokenRef.current !== roundToken) playYouTube()
       }, 150)
     }
 
@@ -178,30 +219,42 @@ export default function GameScreen() {
             onReady: event => loadClip(event.target),
             onStateChange: event => {
               if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
+                clearTimeout(failSafeTimerRef.current)
+
                 setIsPlaying(true)
                 setTimerActive(true)
                 setPlaybackBlocked(false)
                 setPlaybackError(false)
                 setPhaseLabel('소리를 들어보세요!')
-                emit('youtube_playing') // 첫 재생 성공 시 서버로 전송
+                emit('youtube_playing')
 
                 clearTimeout(audioStopTimerRef.current)
+                // 정확히 10초 재생 후 음원 정지 및 남은 5초간 째깍째깍 구동
                 audioStopTimerRef.current = setTimeout(() => {
                   try { playerRef.current?.pauseVideo?.() } catch (e) {}
                   setIsPlaying(false)
+                  
+                  // 💡 째깍째깍 루프 기동 (10초 끝난 직후부터 1초 간격으로 총 5번 재생)
+                  clearTickTimers()
+                  for (let i = 0; i < 5; i++) {
+                    tickTimersRef.current.push(
+                      setTimeout(() => {
+                        playTickSound()
+                      }, i * 1000)
+                    )
+                  }
                 }, 10000)
               }
               if (event.data === YOUTUBE_PLAYER_STATE.PAUSED || event.data === YOUTUBE_PLAYER_STATE.ENDED) {
                 setIsPlaying(false)
               }
             },
-            // 🚨 재생할 수 없는 유튜브 영상일 경우 지연 없이 즉시 스킵!
+            // 🚨 재생 불가 에러 발생 시 안내 팝업이나 문구 출력 없이 즉시 0.1초 만에 다음 문제 스킵
             onError: () => {
-              setMediaLoaded(true)
+              clearTimeout(failSafeTimerRef.current)
+              clearTimeout(audioStopTimerRef.current)
+              clearTickTimers()
               setIsPlaying(false)
-              setPlaybackBlocked(false)
-              setPlaybackError(true)
-              setPhaseLabel('⚠️ 재생 불가 영상! 라운드를 즉시 스킵합니다.')
               emit('skip_round') 
             },
             onAutoplayBlocked: () => {
@@ -214,19 +267,20 @@ export default function GameScreen() {
         })
       })
       .catch(() => {
-        setMediaLoaded(true)
-        setPlaybackError(true)
-        setPhaseLabel('YouTube 플레이어를 불러오지 못했습니다')
+        setIsPlaying(false)
+        emit('skip_round')
       })
 
     return () => {
       cancelled = true
+      clearTimeout(failSafeTimerRef.current)
       clearTimeout(audioStopTimerRef.current)
+      clearTickTimers()
       try {
         playerRef.current?.stopVideo?.()
       } catch (error) {}
     }
-  }, [youtubeId, youtubeStart, youtubeEnd, currentRound, playYouTube, emit])
+  }, [youtubeId, youtubeStart, youtubeEnd, currentRound, playYouTube, emit, playTickSound, clearTickTimers])
 
   useEffect(() => {
     if (roundActive && inputRef.current) {
@@ -237,9 +291,11 @@ export default function GameScreen() {
   useEffect(() => {
     if (!roundActive) {
       setTimerActive(false)
+      clearTimeout(failSafeTimerRef.current)
       clearTimeout(audioStopTimerRef.current)
+      clearTickTimers()
     }
-  }, [roundActive])
+  }, [roundActive, clearTickTimers])
 
   useEffect(() => {
     if (lastResult) {
@@ -249,6 +305,9 @@ export default function GameScreen() {
       try {
         playerRef.current?.pauseVideo?.()
       } catch (error) {}
+      
+      setIsPlaying(false)
+      clearTickTimers() // 정답자가 나오거나 라운드가 만료되면 째깍째깍 즉시 중단
 
       setShowResult(true)
       setPhaseLabel(lastResult.correct ? '🎉 정답!' : '⏰ 라운드 종료!')
@@ -256,7 +315,7 @@ export default function GameScreen() {
       return () => clearTimeout(t)
     }
     return undefined
-  }, [lastResult])
+  }, [lastResult, clearTickTimers])
 
   const handleSubmit = useCallback(() => {
     if (!answer.trim() || submitted || !roundActive) return
@@ -422,7 +481,6 @@ export default function GameScreen() {
 
         <div className="timer-panel glass-panel">
           <div className="timer-label">남은 시간</div>
-          {/* 💡 서버가 타이머를 시작했다면(isTimerRunning) 무조건 강제 출발! */}
           <TimerRing
             timeLimit={state.timeLimit || 15}
             active={isTimerRunning || timerActive} 
