@@ -56,7 +56,8 @@ export default function GameScreen() {
     players, myId, nickname,
     currentRound, totalRounds, category, hint,
     youtubeId, youtubeStart, youtubeEnd,
-    roundActive, lastResult, targetScore
+    roundActive, lastResult, targetScore,
+    isTimerRunning // 💡 서버에서 보내주는 글로벌 타이머 작동 신호!
   } = state
 
   const [answer, setAnswer] = useState('')
@@ -75,7 +76,6 @@ export default function GameScreen() {
   const playerHostIdRef = useRef(`Youtubeer-${Math.random().toString(36).slice(2)}`)
   const roundTokenRef = useRef(0)
 
-  const failSafeTimerRef = useRef(null)
   const audioStopTimerRef = useRef(null)
 
   const playYouTube = useCallback(() => {
@@ -117,7 +117,6 @@ export default function GameScreen() {
     setPlaybackError(false)
     setPhaseLabel('YouTube 플레이어 준비 중...')
 
-    clearTimeout(failSafeTimerRef.current)
     clearTimeout(audioStopTimerRef.current)
 
     if (!youtubeId) {
@@ -130,15 +129,6 @@ export default function GameScreen() {
       }
       return undefined
     }
-
-    // 🚨 문제의 알림창(alert) 완전 삭제! 10초 대기 후 시스템 내부 텍스트(UI)로 처리
-    failSafeTimerRef.current = setTimeout(() => {
-      setIsPlaying(false)
-      setTimerActive(false)
-      setPlaybackError(true)
-      setPhaseLabel('⚠️ 재생 지연 오류! 라운드를 스킵합니다.') // 화면 중앙 텍스트 업데이트
-      emit('skip_round')
-    }, 10000)
 
     let cancelled = false
     const startSeconds = Number(youtubeStart) || 0
@@ -188,14 +178,12 @@ export default function GameScreen() {
             onReady: event => loadClip(event.target),
             onStateChange: event => {
               if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
-                clearTimeout(failSafeTimerRef.current)
-
                 setIsPlaying(true)
                 setTimerActive(true)
                 setPlaybackBlocked(false)
                 setPlaybackError(false)
                 setPhaseLabel('소리를 들어보세요!')
-                emit('youtube_playing')
+                emit('youtube_playing') // 첫 재생 성공 시 서버로 전송
 
                 clearTimeout(audioStopTimerRef.current)
                 audioStopTimerRef.current = setTimeout(() => {
@@ -207,12 +195,14 @@ export default function GameScreen() {
                 setIsPlaying(false)
               }
             },
+            // 🚨 재생할 수 없는 유튜브 영상일 경우 지연 없이 즉시 스킵!
             onError: () => {
               setMediaLoaded(true)
               setIsPlaying(false)
               setPlaybackBlocked(false)
               setPlaybackError(true)
-              setPhaseLabel('YouTube 영상을 재생할 수 없습니다')
+              setPhaseLabel('⚠️ 재생 불가 영상! 라운드를 즉시 스킵합니다.')
+              emit('skip_round') 
             },
             onAutoplayBlocked: () => {
               setMediaLoaded(true)
@@ -231,7 +221,6 @@ export default function GameScreen() {
 
     return () => {
       cancelled = true
-      clearTimeout(failSafeTimerRef.current)
       clearTimeout(audioStopTimerRef.current)
       try {
         playerRef.current?.stopVideo?.()
@@ -248,7 +237,6 @@ export default function GameScreen() {
   useEffect(() => {
     if (!roundActive) {
       setTimerActive(false)
-      clearTimeout(failSafeTimerRef.current)
       clearTimeout(audioStopTimerRef.current)
     }
   }, [roundActive])
@@ -296,7 +284,6 @@ export default function GameScreen() {
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
 
-      {/* Result overlay */}
       {showResult && lastResult && (
         <div className={`result-overlay ${lastResult.correct || lastResult.noWinner ? 'show' : ''}`}>
           {lastResult.winnerId && (
@@ -312,7 +299,6 @@ export default function GameScreen() {
           {lastResult.noWinner && (
             <div className="result-banner timeout animate-scaleIn">
               <div className="result-icon">⏰</div>
-              {/* 💡 상식적인 처리: 스킵과 일반 타임아웃의 메시지 분리 및 하드코딩된 '모두에게 +1점' 텍스트 제거 */}
               <div className="result-text">
                 {lastResult.message?.includes('스킵') ? '재생 오류 스킵!' : '시간 초과!'}
               </div>
@@ -325,7 +311,6 @@ export default function GameScreen() {
 
       <div className="game-layout">
 
-        {/* LEFT: Scoreboard */}
         <div className="scoreboard-panel glass-panel">
           <div className="scoreboard-title">🏆 스코어보드</div>
           <div className="score-list">
@@ -351,7 +336,6 @@ export default function GameScreen() {
           </div>
         </div>
 
-        {/* CENTER: Game area */}
         <div className="game-center">
 
           <div className="round-progress">
@@ -371,7 +355,6 @@ export default function GameScreen() {
             </div>
           )}
 
-          {/* YouTube player + visualizer */}
           <div className="audio-area glass-panel">
             <div className="audio-inner youtube-audio-inner">
               <div className="youtube-player-shell">
@@ -400,7 +383,6 @@ export default function GameScreen() {
             </div>
           </div>
 
-          {/* Answer input area */}
           <div className={`answer-area glass-panel ${roundActive ? 'active' : ''}`}>
             {roundActive ? (
               <>
@@ -438,12 +420,12 @@ export default function GameScreen() {
           </div>
         </div>
 
-        {/* RIGHT: Timer */}
         <div className="timer-panel glass-panel">
           <div className="timer-label">남은 시간</div>
+          {/* 💡 서버가 타이머를 시작했다면(isTimerRunning) 무조건 강제 출발! */}
           <TimerRing
             timeLimit={state.timeLimit || 15}
-            active={timerActive} 
+            active={isTimerRunning || timerActive} 
           />
           <div className="timer-hint">빠를수록 유리!</div>
         </div>
