@@ -63,6 +63,7 @@ export default function GameScreen() {
 
   const [answer, setAnswer] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
+  const [timerActive, setTimerActive] = useState(false);
   const [mediaLoaded, setMediaLoaded] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [flashWrong, setFlashWrong] = useState(false)
@@ -73,6 +74,7 @@ export default function GameScreen() {
 
   const inputRef = useRef(null)
   const playerRef = useRef(null)
+  const audioRef = useRef(null)
   const playerHostIdRef = useRef(`youtube-player-${Math.random().toString(36).slice(2)}`)
   const roundTokenRef = useRef(0)
 
@@ -277,6 +279,18 @@ export default function GameScreen() {
 
   const progressPct = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
 
+  useEffect(() => {
+    if (roundActive && state.audioUrl) {
+       // ... (오디오 10초 재생 및 타이머 시작 로직) ...
+    }
+  }, [roundActive, state.currentRound, state.audioUrl, state.startTime, emit]);
+
+  useEffect(() => {
+    if (!roundActive) {
+      setTimerActive(false);
+    }
+  }, [roundActive]);
+
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
 
@@ -432,7 +446,7 @@ export default function GameScreen() {
           <div className="timer-label">남은 시간</div>
           <TimerRing
             timeLimit={state.timeLimit || 15}
-            active={roundActive && isPlaying}
+            active={timerActive} 
           />
           <div className="timer-hint">빠를수록 유리!</div>
         </div>
