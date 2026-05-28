@@ -28,7 +28,6 @@ app.use(express.json());
 app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 app.get('/', (_, res) => res.json({ name: 'Sound Quiz Show Server', version: '1.0.0' }));
 
-
 const { RAW_QUIZ_DATA } = require('./quizData');
 // ── In-memory state ───────────────────────────────────────────
 // rooms: Map<roomCode, Room>
@@ -197,7 +196,7 @@ io.on('connection', (socket) => {
       const questions = getRandomQuestions(ROUND_COUNT);
       if (questions.length === 0) {
         return cb?.({
-          error: '재생 가능한 YouTube 문제가 없습니다. quizData.js에 youtubeId를 추가해주세요.'
+          error: '재생 가능한 문제가 없습니다. quizData.js를 확인해주세요.'
         });
       }
 
@@ -254,6 +253,7 @@ io.on('connection', (socket) => {
 
         // Score: correct player +1
         player.score += 1;
+        io.to(room.code).emit('room_update', getRoomState(room));
 
         io.to(room.code).emit('answer_result', {
           correct: true,
@@ -265,7 +265,7 @@ io.on('connection', (socket) => {
 
         setTimeout(() => checkEndOrNextRound(room), 2500);
       } else {
-        // Tell only this player it was wrong
+        // Tell only this player it was wrong (화면 잠금 해제 역할)
         socket.emit('answer_result', {
           correct: false,
           playerId: socket.id,
@@ -274,6 +274,80 @@ io.on('connection', (socket) => {
       }
     } catch (e) {
       console.error(e);
+    }
+  });
+
+  // ── skip_round (NEW) ───────────────────────────────────────
+  // 클라이언트에서 20초 재생 실패 시 강제 스킵을 요청할 때 처리
+  socket.on('skip_round', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.status !== 'PLAYING') return;
+
+      if (room.roundTimer) {
+        clearTimeout(room.roundTimer);
+        room.roundTimer = null;
+      }
+      if (room.hintTimer) {
+        clearTimeout(room.hintTimer);
+        room.hintTimer = null;
+      }
+
+      room.answeredThisRound = true; // 강제 잠금 처리
+
+      io.to(room.code).emit('answer_result', {
+        correct: false,
+        noWinner: true,
+        answer: room.questions[room.currentRound - 1]?.answers[0] || '알 수 없음',
+        message: '음원 재생 지연으로 라운드를 스킵합니다.',
+        scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+      });
+
+      setTimeout(() => checkEndOrNextRound(room), 2500);
+    } catch (e) {
+      console.error("Skip Round Error:", e);
+    }
+  });
+
+  // ── youtube_playing (NEW) ──────────────────────────────────
+  // 오디오가 정상적으로 재생되기 시작했을 때 서버 타이머 출발
+  socket.on('youtube_playing', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      
+      if (room && room.status === 'PLAYING' && !room.roundTimer) {
+        const question = room.questions[room.currentRound - 1];
+        
+        // 10초 뒤 힌트 공개 타이머
+        if (question && question.hint) {
+          room.hintTimer = setTimeout(() => {
+            if (room.status === 'PLAYING' && !room.answeredThisRound) {
+              io.to(room.code).emit('hint_revealed', { hint: question.hint });
+            }
+          }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000); 
+        }
+
+        // 15초 라운드 종료 타이머
+        room.roundTimer = setTimeout(() => {
+          room.hintTimer = null;
+          if (!room.answeredThisRound) {
+            room.answeredThisRound = true;
+            
+            // 💡 상식적인 룰 적용: 타임아웃 시 아무도 점수를 얻지 못합니다! (everyone else +1 삭제됨)
+            io.to(room.code).emit('answer_result', {
+              correct: false,
+              noWinner: true,
+              answer: question.answers[0],
+              message: '시간 초과! 아무도 맞히지 못했습니다.',
+              scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+            });
+
+            setTimeout(() => checkEndOrNextRound(room), 2500);
+          }
+        }, ROUND_TIME_LIMIT * 1000);
+      }
+    } catch (e) {
+      console.error("Youtube Playing Error:", e);
     }
   });
 
@@ -318,6 +392,8 @@ io.on('connection', (socket) => {
 function startRound(room) {
   if (room.roundTimer) clearTimeout(room.roundTimer);
   if (room.hintTimer) clearTimeout(room.hintTimer);
+  room.roundTimer = null;
+  room.hintTimer = null;
 
   room.currentRound += 1;
   room.answeredThisRound = false;
@@ -339,33 +415,8 @@ function startRound(room) {
     timeLimit: ROUND_TIME_LIMIT
   });
 
-  if (question.hint) {
-    room.hintTimer = setTimeout(() => {
-      if (room.status !== 'PLAYING') return;
-      if (room.currentRound !== roundNumber || room.answeredThisRound) return;
-      io.to(room.code).emit('hint_revealed', { hint: question.hint });
-      room.hintTimer = null;
-    }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000);
-  }
-
-  // Round timer
-  room.roundTimer = setTimeout(() => {
-    room.hintTimer = null;
-    if (!room.answeredThisRound) {
-      // No correct answer → everyone else gets +1 (original board game rule)
-      room.players.forEach(p => { p.score += 1; });
-
-      io.to(room.code).emit('answer_result', {
-        correct: false,
-        noWinner: true,
-        answer: question.answers[0],
-        message: '시간 초과! 모두에게 1점이 주어집니다.',
-        scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-      });
-
-      setTimeout(() => checkEndOrNextRound(room), 2500);
-    }
-  }, 15000);
+  // 🚨 [수정됨] 기존에 무조건 돌아가던 힌트 및 라운드 타이머는 삭제되었습니다.
+  // 프론트엔드에서 음원 재생이 확인되어 'youtube_playing' 신호가 오면 그때부터 시작됩니다.
 }
 
 function checkEndOrNextRound(room) {
@@ -388,14 +439,18 @@ function endGame(room) {
     room.hintTimer = null;
   }
 
-  const sorted = [...room.players].sort((a, b) => b.score - a.score);
+  // 💡 [수정됨] 0점 초기화 버그 해결을 위해 플레이어 데이터를 완벽하게 복제(Deep Copy)합니다.
+  const finalScores = room.players
+    .map(p => ({ ...p }))
+    .sort((a, b) => b.score - a.score);
+
   room.status = 'WAITING';
   room.currentRound = 0;
   room.players.forEach(p => { p.score = 0; p.isReady = false; });
 
   io.to(room.code).emit('game_over', {
-    winner: sorted[0],
-    finalScores: sorted,
+    winner: finalScores[0],
+    finalScores: finalScores,
     roomCode: room.code
   });
 
