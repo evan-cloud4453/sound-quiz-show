@@ -80,12 +80,12 @@ export default function GameScreen() {
   const playerHostIdRef = useRef(`Youtubeer-${Math.random().toString(36).slice(2)}`)
   const roundTokenRef = useRef(0)
 
-  const failSafeTimerRef = useRef(null)
   const audioStopTimerRef = useRef(null)
   const tickTimersRef = useRef([])
 
   const stateChangeHandlerRef = useRef()
 
+  // Web Audio API 기본 탑재 째깍째깍 사운드
   const playTickSound = useCallback(() => {
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext
@@ -124,11 +124,9 @@ export default function GameScreen() {
           onStateChange: (event) => stateChangeHandlerRef.current?.(event),
           onError: () => {
             if (isUnlockingRef.current) return; 
-            clearTimeout(failSafeTimerRef.current);
-            clearTimeout(audioStopTimerRef.current);
             clearTickTimers();
             setIsPlaying(false);
-            emit('skip_round'); // 조용히 스킵 신호만 보냄
+            emit('skip_round'); // 재생 불가능할 때만 서버에 조용히 보고
           }
         }
       });
@@ -168,7 +166,6 @@ export default function GameScreen() {
     }
 
     if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
-      clearTimeout(failSafeTimerRef.current);
       setIsPlaying(true);
       setTimerActive(true);
       setPlaybackBlocked(false);
@@ -215,7 +212,6 @@ export default function GameScreen() {
     setPlaybackError(false);
     setPhaseLabel('오디오 세팅 중...');
 
-    clearTimeout(failSafeTimerRef.current);
     clearTimeout(audioStopTimerRef.current);
     clearTickTimers();
 
@@ -223,12 +219,6 @@ export default function GameScreen() {
       emit('skip_round');
       return;
     }
-
-    failSafeTimerRef.current = setTimeout(() => {
-      setIsPlaying(false);
-      setTimerActive(false);
-      emit('skip_round'); // 10초 무한 로딩 시 조용히 스킵 신호 발송
-    }, 10000);
 
     const startSeconds = Number(youtubeStart) || 0;
     const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
@@ -252,7 +242,6 @@ export default function GameScreen() {
   useEffect(() => {
     if (!roundActive) {
       setTimerActive(false);
-      clearTimeout(failSafeTimerRef.current);
       clearTimeout(audioStopTimerRef.current);
       clearTickTimers();
     }
