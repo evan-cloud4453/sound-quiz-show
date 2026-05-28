@@ -38,18 +38,23 @@ const QUIZ_DATA = RAW_QUIZ_DATA.map(question => ({
   youtubeEnd: Number(question.youtubeEnd ?? question.end ?? 0)
 }));
 
+// 🚨 [핵심 버그 수정 1] '여기에_ID_입력' 같은 불량 데이터는 아예 게임에 출제되지 않도록 원천 차단!
+function getPlayableQuestions() {
+  return QUIZ_DATA.filter(q => {
+    if (q.audioUrl) return true;
+    if (q.youtubeId && q.youtubeId !== '여기에_ID_입력' && q.youtubeId.length >= 10) return true;
+    return false;
+  });
+}
+
 console.log(`총 ${QUIZ_DATA.length}개의 퀴즈 데이터를 성공적으로 불러왔습니다.`);
-console.log(`[Quiz] YouTube playable questions: ${getPlayableQuestions().length}/${QUIZ_DATA.length}`);
+console.log(`[Quiz] 실제 출제 가능한(필터링 완료) 유튜브 문제: ${getPlayableQuestions().length}개`);
 
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
   return code;
-}
-
-function getPlayableQuestions() {
-  return QUIZ_DATA.filter(question => question.youtubeId || question.audioUrl);
 }
 
 function getRandomQuestions(count = 10) {
@@ -171,9 +176,10 @@ io.on('connection', (socket) => {
       if (room.players.length < 1) return cb?.({ error: '최소 1명 이상 필요합니다.' });
       if (room.isStarting) return cb?.({ error: '게임을 시작하는 중입니다. 잠시만 기다려주세요.' });
 
+      // 필터링된 진짜 문제들만 가져옵니다!
       const questions = getRandomQuestions(ROUND_COUNT);
       if (questions.length === 0) {
-        return cb?.({ error: '재생 가능한 문제가 없습니다. quizData.js를 확인해주세요.' });
+        return cb?.({ error: '출제 가능한 문제가 없습니다. quizData.js에 실제 유튜브 ID를 입력해주세요.' });
       }
 
       room.isStarting = true;
@@ -258,23 +264,24 @@ io.on('connection', (socket) => {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.status !== 'PLAYING') return;
 
-      // 🚨 [방어벽 보강] 이미 누군가 재생에 성공해서 진짜 15초 타이머가 돌고 있다면 
-      // 뒤늦은 클라이언트의 스킵 신호는 완벽하게 씹어버립니다 (강제 조기 스킵 팀킬 방지!)
       if (room.answeredThisRound || room.roundTimer) return;
-
       room.answeredThisRound = true;
 
-      if (room.hintTimer) {
-        clearTimeout(room.hintTimer);
-        room.hintTimer = null;
-      }
-      if (room.loadingTimeoutTimer) {
-        clearTimeout(room.loadingTimeoutTimer);
-        room.loadingTimeoutTimer = null;
-      }
+      if (room.hintTimer) clearTimeout(room.hintTimer);
+      if (room.loadingTimeoutTimer) clearTimeout(room.loadingTimeoutTimer);
+      room.hintTimer = null;
+      room.loadingTimeoutTimer = null;
 
-      // 재생 불가능한 완전 불량 파일일때만 문구 없이 초고속 다음 라운드 패스 연출
-      checkEndOrNextRound(room);
+      // 🚨 혹시라도 유튜브가 터져서 강제 스킵되더라도 정답은 무조건 공개되도록 픽스 완료!
+      io.to(room.code).emit('answer_result', {
+        correct: false,
+        noWinner: true,
+        answer: room.questions[room.currentRound - 1]?.answers[0] || '알 수 없음',
+        message: '영상을 재생할 수 없어 스킵했습니다.',
+        scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+      });
+
+      setTimeout(() => checkEndOrNextRound(room), 2500);
     } catch (e) {
       console.error("Skip Round Error:", e);
     }
@@ -302,7 +309,8 @@ io.on('connection', (socket) => {
         }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000); 
       }
 
-      // 💡 진짜 15초 라운드 카운트다운 타이머 구동
+      // 🚨 [핵심 버그 수정 2] 클라이언트 애니메이션보다 서버가 빨리 닫히는 현상 방지!
+      // 15초(15000ms)에 500ms의 유예 시간(Grace Period)을 추가하여 1초 남기고 튕기는 버그 완벽 차단!
       room.roundTimer = setTimeout(() => {
         try {
           room.hintTimer = null;
@@ -310,7 +318,6 @@ io.on('connection', (socket) => {
             room.answeredThisRound = true;
             
             const currentQuestion = room.questions[room.currentRound - 1];
-            // 🚨 타임아웃 끝났을 때 정답 텍스트를 무조건 패킷에 주입해 화면 배너에 공개하도록 안착!
             const answerText = currentQuestion?.answers?.[0] || '알 수 없음';
 
             io.to(room.code).emit('answer_result', {
@@ -329,7 +336,7 @@ io.on('connection', (socket) => {
           console.error("타이머 내부 동작 예외 복구 완료:", timerError);
           setTimeout(() => checkEndOrNextRound(room), 100);
         }
-      }, ROUND_TIME_LIMIT * 1000);
+      }, (ROUND_TIME_LIMIT * 1000) + 500);
 
       io.to(room.code).emit('room_update', getRoomState(room));
     } catch (e) {
@@ -398,17 +405,26 @@ function startRound(room) {
 
     io.to(room.code).emit('room_update', getRoomState(room));
 
-    // 15초간 아무도 방에 접속해서 재생 완료 신호를 안 보내면 불량 파일로 간주하고 무배너 통과 처리
+    // 혹시라도 서버로 신호가 안 오면 정답 공개 후 다음 라운드로!
     room.loadingTimeoutTimer = setTimeout(() => {
       try {
         if (room.status === 'PLAYING' && !room.roundTimer && !room.answeredThisRound) {
           room.answeredThisRound = true;
-          checkEndOrNextRound(room);
+          
+          io.to(room.code).emit('answer_result', {
+            correct: false,
+            noWinner: true,
+            answer: question?.answers?.[0] || '알 수 없음',
+            message: '시간 초과! (재생 지연)',
+            scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+          });
+
+          setTimeout(() => checkEndOrNextRound(room), 2500);
         }
       } catch (e) {
         checkEndOrNextRound(room);
       }
-    }, 15000);
+    }, 16000); // 💡 클라이언트 타이머보다 넉넉하게 16초로 설정
 
   } catch (err) {
     console.error("라운드 빌드 예외 핸들링:", err);
