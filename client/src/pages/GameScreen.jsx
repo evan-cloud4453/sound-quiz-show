@@ -1,8 +1,14 @@
+// client/src/pages/GameScreen.jsx
+
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGame } from '../utils/GameContext'
+// 아래 한 줄을 import 영역에 추가합니다.
+import { useSocket } from '../hooks/useSocket' 
+
 import WaveformVisualizer from '../components/WaveformVisualizer'
 import TimerRing from '../components/TimerRing'
 import './GameScreen.css'
+
 
 const YOUTUBE_PLAYER_STATE = {
   ENDED: 0,
@@ -47,6 +53,7 @@ function getAvatar(id) {
 
 export default function GameScreen() {
   const { state, submitAnswer } = useGame()
+  const { emit } = useSocket()
   const {
     players, myId, nickname,
     currentRound, totalRounds, category, hint,
@@ -216,6 +223,13 @@ export default function GameScreen() {
       setTimeout(() => inputRef.current?.focus(), 300)
     }
   }, [roundActive])
+
+  // 유튜브 미디어가 재생 중이고 라운드가 활성화되었을 때 서버로 타이머 시작 신호 전송
+  useEffect(() => {
+    if (isPlaying && roundActive) {
+      emit('youtube_playing'); 
+    }
+  }, [isPlaying, roundActive, emit]);
 
   // Show result overlay and stop the clip
   useEffect(() => {
@@ -418,7 +432,7 @@ export default function GameScreen() {
           <div className="timer-label">남은 시간</div>
           <TimerRing
             timeLimit={state.timeLimit || 15}
-            active={roundActive}
+            active={roundActive && isPlaying}
           />
           <div className="timer-hint">빠를수록 유리!</div>
         </div>
