@@ -18,6 +18,31 @@ const YOUTUBE_PLAYER_STATE = {
 
 let youtubeApiPromise = null
 
+// 현재 라운드 문제 데이터에 audioUrl과 startTime이 들어있다고 가정
+const currentQuestion = state.currentQuestion; 
+
+// 라운드가 시작될 때 실행될 함수
+function playQuizAudio() {
+  if (!currentQuestion?.audioUrl) return;
+
+  const audio = new Audio(currentQuestion.audioUrl);
+  
+  // 1. 디렉터님이 지정한 시작 초(startTime)로 재생 위치 이동!
+  audio.currentTime = currentQuestion.startTime || 0; 
+  
+  // 2. 재생 시작 (재생 성공 시 타이머 시작 신호 emit)
+  audio.play().then(() => {
+    setIsPlaying(true);
+    // (이전 채팅에서 만들었던 'youtube_playing' 신호를 여기서 서버로 쏴주면 됩니다)
+  });
+
+  // 3. 정확히 10초 뒤에 음악 강제 종료!
+  setTimeout(() => {
+    audio.pause();
+    setIsPlaying(false);
+  }, 10000); 
+}
+
 function loadYouTubeApi() {
   if (typeof window === 'undefined') return Promise.reject(new Error('YouTube API requires a browser'))
   if (window.YT?.Player) return Promise.resolve(window.YT)
