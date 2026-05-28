@@ -61,7 +61,7 @@ export default function GameScreen() {
 
   const [answer, setAnswer] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
-  const [timerActive, setTimerActive] = useState(false) // 💡 분리된 타이머 상태
+  const [timerActive, setTimerActive] = useState(false)
   const [mediaLoaded, setMediaLoaded] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [flashWrong, setFlashWrong] = useState(false)
@@ -75,7 +75,6 @@ export default function GameScreen() {
   const playerHostIdRef = useRef(`Youtubeer-${Math.random().toString(36).slice(2)}`)
   const roundTokenRef = useRef(0)
 
-  // 💡 타이머 관리용 Ref
   const failSafeTimerRef = useRef(null)
   const audioStopTimerRef = useRef(null)
 
@@ -103,7 +102,6 @@ export default function GameScreen() {
     }
   }, [])
 
-  // 라운드 시작: 유튜브 클립 로딩 및 타이머 세팅
   useEffect(() => {
     const roundToken = roundTokenRef.current + 1
     roundTokenRef.current = roundToken
@@ -133,13 +131,14 @@ export default function GameScreen() {
       return undefined
     }
 
-    // 🚨 [새로 추가된 핵심] 20초 동안 재생이 안 되면 팝업 띄우고 다음으로 강제 스킵!
+    // 🚨 문제의 알림창(alert) 완전 삭제! 10초 대기 후 시스템 내부 텍스트(UI)로 처리
     failSafeTimerRef.current = setTimeout(() => {
       setIsPlaying(false)
       setTimerActive(false)
-      window.alert("⚠️ 유튜브 재생 지연 오류! 다음 문제로 강제 이동합니다.")
+      setPlaybackError(true)
+      setPhaseLabel('⚠️ 재생 지연 오류! 라운드를 스킵합니다.') // 화면 중앙 텍스트 업데이트
       emit('skip_round')
-    }, 20000)
+    }, 10000)
 
     let cancelled = false
     const startSeconds = Number(youtubeStart) || 0
@@ -153,7 +152,7 @@ export default function GameScreen() {
       player.loadVideoById({
         videoId: youtubeId,
         startSeconds,
-        endSeconds // 하지만 실제 10초 컷은 아래 audioStopTimer가 확실하게 보장합니다.
+        endSeconds
       })
       setTimeout(() => {
         if (!cancelled && roundTokenRef.current === roundToken) playYouTube()
@@ -189,17 +188,15 @@ export default function GameScreen() {
             onReady: event => loadClip(event.target),
             onStateChange: event => {
               if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
-                // 🟢 재생 성공! 20초 에러 스킵 구명조끼 즉시 해제
                 clearTimeout(failSafeTimerRef.current)
 
                 setIsPlaying(true)
-                setTimerActive(true) // ⏱️ 타이머 출발!
+                setTimerActive(true)
                 setPlaybackBlocked(false)
                 setPlaybackError(false)
                 setPhaseLabel('소리를 들어보세요!')
                 emit('youtube_playing')
 
-                // 🟢 정확히 10초 뒤 유튜브 소리만 끔! (타이머는 계속 돌아감)
                 clearTimeout(audioStopTimerRef.current)
                 audioStopTimerRef.current = setTimeout(() => {
                   try { playerRef.current?.pauseVideo?.() } catch (e) {}
@@ -216,7 +213,6 @@ export default function GameScreen() {
               setPlaybackBlocked(false)
               setPlaybackError(true)
               setPhaseLabel('YouTube 영상을 재생할 수 없습니다')
-              // 에러가 나더라도 20초 failSafeTimer가 돌고 있으니 자동 스킵됩니다!
             },
             onAutoplayBlocked: () => {
               setMediaLoaded(true)
@@ -243,14 +239,12 @@ export default function GameScreen() {
     }
   }, [youtubeId, youtubeStart, youtubeEnd, currentRound, playYouTube, emit])
 
-  // 자동 포커스
   useEffect(() => {
     if (roundActive && inputRef.current) {
       setTimeout(() => inputRef.current?.focus(), 300)
     }
   }, [roundActive])
 
-  // 라운드가 끝나면 타이머 완전히 초기화
   useEffect(() => {
     if (!roundActive) {
       setTimerActive(false)
@@ -259,7 +253,6 @@ export default function GameScreen() {
     }
   }, [roundActive])
 
-  // 정답 혹은 타임아웃 결과 처리
   useEffect(() => {
     if (lastResult) {
       const isRoundResult = lastResult.correct || lastResult.noWinner || lastResult.winnerId
@@ -270,7 +263,7 @@ export default function GameScreen() {
       } catch (error) {}
 
       setShowResult(true)
-      setPhaseLabel(lastResult.correct ? '🎉 정답!' : '⏰ 시간 초과!')
+      setPhaseLabel(lastResult.correct ? '🎉 정답!' : '⏰ 라운드 종료!')
       const t = setTimeout(() => setShowResult(false), 2500)
       return () => clearTimeout(t)
     }
@@ -287,7 +280,6 @@ export default function GameScreen() {
     if (e.key === 'Enter') handleSubmit()
   }
 
-  // 개인 오답 시 붉은 화면 깜빡임
   useEffect(() => {
     if (lastResult && !lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) {
       setSubmitted(false) 
@@ -320,9 +312,12 @@ export default function GameScreen() {
           {lastResult.noWinner && (
             <div className="result-banner timeout animate-scaleIn">
               <div className="result-icon">⏰</div>
-              <div className="result-text">시간 초과!</div>
+              {/* 💡 상식적인 처리: 스킵과 일반 타임아웃의 메시지 분리 및 하드코딩된 '모두에게 +1점' 텍스트 제거 */}
+              <div className="result-text">
+                {lastResult.message?.includes('스킵') ? '재생 오류 스킵!' : '시간 초과!'}
+              </div>
               <div className="result-answer">정답: {lastResult.answer}</div>
-              <div className="result-sub">모두에게 +1점</div>
+              <div className="result-sub">{lastResult.message || '아무도 점수를 얻지 못했습니다 (0점)'}</div>
             </div>
           )}
         </div>
@@ -446,7 +441,6 @@ export default function GameScreen() {
         {/* RIGHT: Timer */}
         <div className="timer-panel glass-panel">
           <div className="timer-label">남은 시간</div>
-          {/* 💡 독립된 타이머 상태가 여기에 적용됩니다! */}
           <TimerRing
             timeLimit={state.timeLimit || 15}
             active={timerActive} 
