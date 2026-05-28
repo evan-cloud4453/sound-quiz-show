@@ -294,25 +294,33 @@ io.on('connection', (socket) => {
           }, (ROUND_TIME_LIMIT - HINT_REVEAL_SECONDS) * 1000); 
         }
 
+        // 💡 타이머 내부에 완벽한 try...catch 방어막 구축!
         room.roundTimer = setTimeout(() => {
-          room.hintTimer = null;
-          if (!room.answeredThisRound) {
-            room.answeredThisRound = true;
-            
-            // 💡 아무도 맞히지 못했을 때 깔끔하게 0점 처리 알림
-            io.to(room.code).emit('answer_result', {
-              correct: false,
-              noWinner: true,
-              answer: question.answers[0],
-              message: '아무도 점수를 얻지 못했습니다 (0점)',
-              scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-            });
+          try {
+            room.hintTimer = null;
+            if (!room.answeredThisRound) {
+              room.answeredThisRound = true;
+              
+              // 에러가 나도 절대 멈추지 않도록 옵셔널 체이닝(?.) 적용
+              const answerText = question?.answers?.[0] || '알 수 없음';
 
+              io.to(room.code).emit('answer_result', {
+                correct: false,
+                noWinner: true,
+                answer: answerText,
+                message: '아무도 점수를 얻지 못했습니다 (0점)',
+                scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+              });
+
+              setTimeout(() => checkEndOrNextRound(room), 2500);
+            }
+          } catch (timerError) {
+            console.error("타이머 콜백 에러 발생 (방어 완료):", timerError);
+            // 에러가 발생해도 게임이 멈추지 않도록 억지로 다음 라운드 강제 호출!
             setTimeout(() => checkEndOrNextRound(room), 2500);
           }
         }, ROUND_TIME_LIMIT * 1000);
 
-        // 🚨 핵심: 서버 타이머가 출발했음을 전 클라이언트에 즉시 전송해 타이머 UI 강제 작동!
         io.to(room.code).emit('room_update', getRoomState(room));
       }
     } catch (e) {
@@ -382,11 +390,17 @@ function startRound(room) {
 }
 
 function checkEndOrNextRound(room) {
-  const winner = room.players.find(p => p.score >= room.targetScore);
-  if (winner || room.currentRound >= room.questions.length) {
+  try {
+    const winner = room.players.find(p => p.score >= room.targetScore);
+    if (winner || room.currentRound >= room.questions.length) {
+      endGame(room);
+    } else {
+      startRound(room);
+    }
+  } catch (error) {
+    console.error("라운드 전환 에러 발생 (강제 종료 처리):", error);
+    // 무한 0초 정지를 막기 위해, 최악의 에러 시 방을 대기 상태로 강제 전환
     endGame(room);
-  } else {
-    startRound(room);
   }
 }
 
