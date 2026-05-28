@@ -1,10 +1,48 @@
+// client/src/pages/GameScreen.jsx
+
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGame } from '../utils/GameContext'
-import { useSocket } from '../hooks/useSocket'
+import { useSocket } from '../hooks/useSocket' 
 
 import WaveformVisualizer from '../components/WaveformVisualizer'
 import TimerRing from '../components/TimerRing'
 import './GameScreen.css'
+
+const YOUTUBE_PLAYER_STATE = {
+  ENDED: 0,
+  PLAYING: 1,
+  PAUSED: 2
+}
+
+let youtubeApiPromise = null
+
+function loadYouTubeApi() {
+  if (typeof window === 'undefined') return Promise.reject(new Error('YouTube API requires a browser'))
+  if (window.YT?.Player) return Promise.resolve(window.YT)
+  if (youtubeApiPromise) return youtubeApiPromise
+
+  youtubeApiPromise = new Promise((resolve, reject) => {
+    const previousCallback = window.onYouTubeIframeAPIReady
+    window.onYouTubeIframeAPIReady = () => {
+      previousCallback?.()
+      resolve(window.YT)
+    }
+
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const script = document.createElement('script')
+      script.src = 'https://www.youtube.com/iframe_api'
+      script.async = true
+      script.onerror = () => reject(new Error('Failed to load YouTube IFrame API'))
+      document.head.appendChild(script)
+    }
+  })
+
+  return youtubeApiPromise
+}
+
+function getClipEnd(start, end) {
+  return end > start ? end : start + 10
+}
 
 const AVATARS = ['🚀', '⭐', '🌙', '💫', '🪐', '☄️', '🌟', '🎵', '👾', '🛸', '🌌', '🔭']
 function getAvatar(id) {
@@ -14,18 +52,16 @@ function getAvatar(id) {
 export default function GameScreen() {
   const { state, submitAnswer } = useGame()
   const { emit } = useSocket()
-  
-  // 💡 MongoDB 데이터 구조에 맞춰 audioUrl과 startTime을 받도록 수정되었습니다.
   const {
     players, myId, nickname,
     currentRound, totalRounds, category, hint,
-    audioUrl, startTime, 
+    youtubeId, youtubeStart, youtubeEnd,
     roundActive, lastResult, targetScore
   } = state
 
   const [answer, setAnswer] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
-  const [timerActive, setTimerActive] = useState(false) // 독립된 타이머 상태
+  const [timerActive, setTimerActive] = useState(false) // 💡 분리된 타이머 상태
   const [mediaLoaded, setMediaLoaded] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [flashWrong, setFlashWrong] = useState(false)
@@ -35,118 +71,203 @@ export default function GameScreen() {
   const [playbackError, setPlaybackError] = useState(false)
 
   const inputRef = useRef(null)
-  const audioRef = useRef(null)
-  const audioStopTimerRef = useRef(null)
-  const failSafeTimerRef = useRef(null)
+  const playerRef = useRef(null)
+  const playerHostIdRef = useRef(`Youtubeer-${Math.random().toString(36).slice(2)}`)
+  const roundTokenRef = useRef(0)
 
-  // =========================================================
-  // 🟢 1. 핵심 오디오 및 20초 에러 스킵 매니저
-  // =========================================================
-  useEffect(() => {
-    if (roundActive && audioUrl) {
-      // 라운드 시작 시 상태 초기화
-      setAnswer('')
-      setSubmitted(false)
-      setFlashWrong(false)
-      setIsPlaying(false)
-      setTimerActive(false)
-      setShowResult(false)
+  // 💡 타이머 관리용 Ref
+  const failSafeTimerRef = useRef(null)
+  const audioStopTimerRef = useRef(null)
+
+  const playYouTube = useCallback(() => {
+    const player = playerRef.current
+    if (!player || !youtubeId) return
+
+    try {
+      player.playVideo()
       setPlaybackBlocked(false)
       setPlaybackError(false)
-      setMediaLoaded(true)
-      setPhaseLabel('오디오 로딩 중...')
-
-      // 기존 오디오 청소
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current = null
-      }
-
-      const audio = new Audio(audioUrl)
-      audio.currentTime = startTime || 0
-      audioRef.current = audio
-
-      // 🚨 [20초 구명조끼] 20초 동안 재생에 성공하지 못하면 강제 스킵!
-      failSafeTimerRef.current = setTimeout(() => {
-        if (audioRef.current) audioRef.current.pause()
-        setIsPlaying(false)
-        setTimerActive(false)
-        window.alert("⚠️ 음원 재생 지연 오류! 다음 문제로 강제 이동합니다.")
-        emit('skip_round') // 서버로 스킵 신호 발송
-      }, 20000)
-
-      // 오디오 자동 재생 시도
-      audio.play()
-        .then(() => {
-          clearTimeout(failSafeTimerRef.current) // 재생 성공 시 에러 타이머 해제
-          setPhaseLabel('소리를 들어보세요!')
-          setIsPlaying(true)
-          setTimerActive(true) // ⏱️ 타이머 출발!
-          emit('youtube_playing')
-
-          // 10초 뒤 음악'만' 정지 (타이머는 계속 돌아감)
-          audioStopTimerRef.current = setTimeout(() => {
-            if (audioRef.current) audioRef.current.pause()
-            setIsPlaying(false)
-          }, 10000)
-        })
-        .catch(err => {
-          console.error("오디오 재생 실패 (브라우저 자동재생 차단):", err)
-          setPlaybackBlocked(true)
-          setPhaseLabel('재생 버튼을 눌러주세요')
-          // failSafeTimerRef는 계속 돌아가고 있으므로, 20초 안에 버튼 안 누르면 넘어감!
-        })
-
-      return () => {
-        clearTimeout(audioStopTimerRef.current)
-        clearTimeout(failSafeTimerRef.current)
-        if (audioRef.current) audioRef.current.pause()
-      }
-    } else if (roundActive && !audioUrl) {
-      setPlaybackError(true)
-      setPhaseLabel('음원 주소가 없습니다.')
+      setPhaseLabel('소리를 들어보세요!')
+    } catch (error) {
+      setPlaybackBlocked(true)
+      setPhaseLabel('재생 버튼을 눌러주세요')
     }
-  }, [roundActive, currentRound, audioUrl, startTime, emit])
+  }, [youtubeId])
 
-  // =========================================================
-  // 🟢 2. 자동재생 차단 시 수동 재생 버튼
-  // =========================================================
-  const playManual = useCallback(() => {
-    if (!audioRef.current) return
-    audioRef.current.play()
-      .then(() => {
-        clearTimeout(failSafeTimerRef.current)
-        setPlaybackBlocked(false)
-        setPhaseLabel('소리를 들어보세요!')
-        setIsPlaying(true)
-        setTimerActive(true)
-        emit('youtube_playing')
-
-        audioStopTimerRef.current = setTimeout(() => {
-          if (audioRef.current) audioRef.current.pause()
-          setIsPlaying(false)
-        }, 10000)
-      })
-      .catch(e => console.error(e))
-  }, [emit])
-
-  // =========================================================
-  // 🟢 3. 기타 게임 상태 관리 (타이머 정지, 정답 처리 등)
-  // =========================================================
   useEffect(() => {
-    if (!roundActive) setTimerActive(false)
+    return () => {
+      try {
+        playerRef.current?.destroy?.()
+      } catch (error) {}
+      playerRef.current = null
+    }
+  }, [])
+
+  // 라운드 시작: 유튜브 클립 로딩 및 타이머 세팅
+  useEffect(() => {
+    const roundToken = roundTokenRef.current + 1
+    roundTokenRef.current = roundToken
+
+    setAnswer('')
+    setSubmitted(false)
+    setFlashWrong(false)
+    setIsPlaying(false)
+    setTimerActive(false)
+    setMediaLoaded(false)
+    setShowResult(false)
+    setPlaybackBlocked(false)
+    setPlaybackError(false)
+    setPhaseLabel('YouTube 플레이어 준비 중...')
+
+    clearTimeout(failSafeTimerRef.current)
+    clearTimeout(audioStopTimerRef.current)
+
+    if (!youtubeId) {
+      setMediaLoaded(true)
+      if (currentRound > 0) {
+        setPlaybackError(true)
+        setPhaseLabel('YouTube 영상이 설정되지 않았습니다')
+      } else {
+        setPhaseLabel('다음 라운드 준비 중...')
+      }
+      return undefined
+    }
+
+    // 🚨 [새로 추가된 핵심] 20초 동안 재생이 안 되면 팝업 띄우고 다음으로 강제 스킵!
+    failSafeTimerRef.current = setTimeout(() => {
+      setIsPlaying(false)
+      setTimerActive(false)
+      window.alert("⚠️ 유튜브 재생 지연 오류! 다음 문제로 강제 이동합니다.")
+      emit('skip_round')
+    }, 20000)
+
+    let cancelled = false
+    const startSeconds = Number(youtubeStart) || 0
+    const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0)
+
+    const loadClip = (player) => {
+      if (cancelled || roundTokenRef.current !== roundToken) return
+
+      setMediaLoaded(true)
+      setPhaseLabel('소리를 들어보세요!')
+      player.loadVideoById({
+        videoId: youtubeId,
+        startSeconds,
+        endSeconds // 하지만 실제 10초 컷은 아래 audioStopTimer가 확실하게 보장합니다.
+      })
+      setTimeout(() => {
+        if (!cancelled && roundTokenRef.current === roundToken) playYouTube()
+      }, 150)
+    }
+
+    loadYouTubeApi()
+      .then(YT => {
+        if (cancelled || roundTokenRef.current !== roundToken) return
+
+        if (playerRef.current?.loadVideoById) {
+          loadClip(playerRef.current)
+          return
+        }
+
+        playerRef.current = new YT.Player(playerHostIdRef.current, {
+          width: 220,
+          height: 200,
+          videoId: youtubeId,
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            iv_load_policy: 3,
+            playsinline: 1,
+            rel: 0,
+            start: Math.floor(startSeconds),
+            end: Math.floor(endSeconds),
+            origin: window.location.origin
+          },
+          events: {
+            onReady: event => loadClip(event.target),
+            onStateChange: event => {
+              if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
+                // 🟢 재생 성공! 20초 에러 스킵 구명조끼 즉시 해제
+                clearTimeout(failSafeTimerRef.current)
+
+                setIsPlaying(true)
+                setTimerActive(true) // ⏱️ 타이머 출발!
+                setPlaybackBlocked(false)
+                setPlaybackError(false)
+                setPhaseLabel('소리를 들어보세요!')
+                emit('youtube_playing')
+
+                // 🟢 정확히 10초 뒤 유튜브 소리만 끔! (타이머는 계속 돌아감)
+                clearTimeout(audioStopTimerRef.current)
+                audioStopTimerRef.current = setTimeout(() => {
+                  try { playerRef.current?.pauseVideo?.() } catch (e) {}
+                  setIsPlaying(false)
+                }, 10000)
+              }
+              if (event.data === YOUTUBE_PLAYER_STATE.PAUSED || event.data === YOUTUBE_PLAYER_STATE.ENDED) {
+                setIsPlaying(false)
+              }
+            },
+            onError: () => {
+              setMediaLoaded(true)
+              setIsPlaying(false)
+              setPlaybackBlocked(false)
+              setPlaybackError(true)
+              setPhaseLabel('YouTube 영상을 재생할 수 없습니다')
+              // 에러가 나더라도 20초 failSafeTimer가 돌고 있으니 자동 스킵됩니다!
+            },
+            onAutoplayBlocked: () => {
+              setMediaLoaded(true)
+              setIsPlaying(false)
+              setPlaybackBlocked(true)
+              setPhaseLabel('재생 버튼을 눌러주세요')
+            }
+          }
+        })
+      })
+      .catch(() => {
+        setMediaLoaded(true)
+        setPlaybackError(true)
+        setPhaseLabel('YouTube 플레이어를 불러오지 못했습니다')
+      })
+
+    return () => {
+      cancelled = true
+      clearTimeout(failSafeTimerRef.current)
+      clearTimeout(audioStopTimerRef.current)
+      try {
+        playerRef.current?.stopVideo?.()
+      } catch (error) {}
+    }
+  }, [youtubeId, youtubeStart, youtubeEnd, currentRound, playYouTube, emit])
+
+  // 자동 포커스
+  useEffect(() => {
+    if (roundActive && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 300)
+    }
   }, [roundActive])
 
+  // 라운드가 끝나면 타이머 완전히 초기화
+  useEffect(() => {
+    if (!roundActive) {
+      setTimerActive(false)
+      clearTimeout(failSafeTimerRef.current)
+      clearTimeout(audioStopTimerRef.current)
+    }
+  }, [roundActive])
+
+  // 정답 혹은 타임아웃 결과 처리
   useEffect(() => {
     if (lastResult) {
       const isRoundResult = lastResult.correct || lastResult.noWinner || lastResult.winnerId
       if (!isRoundResult) return undefined
 
-      // 누군가 정답을 맞히거나 시간이 끝나면 음악 즉시 정지
-      if (audioRef.current) {
-        audioRef.current.pause()
-        setIsPlaying(false)
-      }
+      try {
+        playerRef.current?.pauseVideo?.()
+      } catch (error) {}
 
       setShowResult(true)
       setPhaseLabel(lastResult.correct ? '🎉 정답!' : '⏰ 시간 초과!')
@@ -155,12 +276,6 @@ export default function GameScreen() {
     }
     return undefined
   }, [lastResult])
-
-  useEffect(() => {
-    if (roundActive && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 300)
-    }
-  }, [roundActive])
 
   const handleSubmit = useCallback(() => {
     if (!answer.trim() || submitted || !roundActive) return
@@ -172,9 +287,10 @@ export default function GameScreen() {
     if (e.key === 'Enter') handleSubmit()
   }
 
+  // 개인 오답 시 붉은 화면 깜빡임
   useEffect(() => {
     if (lastResult && !lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) {
-      setSubmitted(false)
+      setSubmitted(false) 
       setAnswer('')
       setFlashWrong(true)
       setTimeout(() => setFlashWrong(false), 600)
@@ -187,6 +303,7 @@ export default function GameScreen() {
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
+
       {/* Result overlay */}
       {showResult && lastResult && (
         <div className={`result-overlay ${lastResult.correct || lastResult.noWinner ? 'show' : ''}`}>
@@ -212,6 +329,7 @@ export default function GameScreen() {
       )}
 
       <div className="game-layout">
+
         {/* LEFT: Scoreboard */}
         <div className="scoreboard-panel glass-panel">
           <div className="scoreboard-title">🏆 스코어보드</div>
@@ -240,6 +358,7 @@ export default function GameScreen() {
 
         {/* CENTER: Game area */}
         <div className="game-center">
+
           <div className="round-progress">
             <div className="round-info">
               <span className="glow-cyan">라운드 {currentRound}</span>
@@ -257,12 +376,11 @@ export default function GameScreen() {
             </div>
           )}
 
-          {/* Audio player + visualizer */}
+          {/* YouTube player + visualizer */}
           <div className="audio-area glass-panel">
             <div className="audio-inner youtube-audio-inner">
-              
               <div className="youtube-player-shell">
-                 {/* 유튜브 iframe 코드는 MongoDB 오디오 방식 전환으로 인해 완전히 삭제되었습니다 */}
+                <div id={playerHostIdRef.current} />
               </div>
 
               <div className="youtube-sound-panel">
@@ -274,15 +392,13 @@ export default function GameScreen() {
                     <span>사운드 로딩 중...</span>
                   </div>
                 )}
-                
-                {/* 브라우저 정책으로 자동재생이 막혔을 때 등장하는 수동 버튼 */}
                 {playbackBlocked && (
-                  <button className="btn btn-secondary audio-play-btn" onClick={playManual}>
+                  <button className="btn btn-secondary audio-play-btn" onClick={playYouTube}>
                     ▶ 재생
                   </button>
                 )}
                 {playbackError && (
-                  <div className="audio-error">음원을 재생할 수 없습니다.</div>
+                  <div className="audio-error">YouTube 영상을 재생할 수 없습니다.</div>
                 )}
                 <div className="phase-label">{phaseLabel}</div>
               </div>
@@ -330,13 +446,14 @@ export default function GameScreen() {
         {/* RIGHT: Timer */}
         <div className="timer-panel glass-panel">
           <div className="timer-label">남은 시간</div>
-          {/* 💡 복잡한 조건 없이 timerActive 하나만으로 완벽하게 돌아갑니다 */}
+          {/* 💡 독립된 타이머 상태가 여기에 적용됩니다! */}
           <TimerRing
             timeLimit={state.timeLimit || 15}
             active={timerActive} 
           />
           <div className="timer-hint">빠를수록 유리!</div>
         </div>
+
       </div>
     </div>
   )
