@@ -246,6 +246,7 @@ export default function GameScreen() {
     }
   };
 
+  // 🔽 이 useEffect 전체를 찾아서 아래 코드로 싹 교체하세요!
   useEffect(() => {
     if (!roundActive || !soundUnlocked) return;
 
@@ -273,24 +274,40 @@ export default function GameScreen() {
       return;
     }
 
+    // 🎤 [추가된 연출] 1. 카테고리(주제) 음성 안내 (1라운드 이상일 때만)
+    let playDelay = 150; // 기본 딜레이
+    if (currentRound > 0 && category) {
+      window.speechSynthesis.cancel(); // 혹시 밀린 음성이 있으면 컷
+      const msg = new SpeechSynthesisUtterance(category);
+      msg.lang = 'ko-KR';
+      msg.rate = 1.3; // 너무 늘어지지 않게 약간 빠르고 경쾌하게!
+      window.speechSynthesis.speak(msg);
+      
+      playDelay = 1500; // 성우가 카테고리를 읽을 시간(1.5초) 동안 음악 대기!
+    }
+
+    // 🚨 [수정됨] 2. 성우 멘트 시간(1.5초)이 생겼으니, 3.5초 단두대 타이머도 5초로 넉넉하게 연장!
     failSafeTimerRef.current = setTimeout(() => {
       setIsPlaying(false);
       setTimerActive(false);
       emit('skip_round');
-    }, 3500);
+    }, 5000); 
 
     const startSeconds = Number(youtubeStart) || 0;
     const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
 
     if (playerRef.current?.loadVideoById) {
       playerRef.current.loadVideoById({ videoId: youtubeId, startSeconds, endSeconds });
+      
+      // 🎶 3. 계산된 딜레이(1.5초) 뒤에 유튜브 음악 큐!
       setTimeout(() => {
         if (roundTokenRef.current === roundToken) {
           try { playerRef.current?.playVideo(); } catch(e){}
         }
-      }, 150);
+      }, playDelay);
     }
-  }, [roundActive, youtubeId, youtubeStart, youtubeEnd, soundUnlocked, emit, clearTickTimers]);
+  // 🚨 의존성 배열에 category와 currentRound 추가를 잊지 마세요!
+  }, [roundActive, youtubeId, youtubeStart, youtubeEnd, soundUnlocked, emit, clearTickTimers, category, currentRound]);
 
   useEffect(() => {
     if (roundActive && soundUnlocked && inputRef.current) {
