@@ -109,7 +109,8 @@ export default function GameScreen() {
     category, hint,
     youtubeId, youtubeStart, youtubeEnd,
     roundActive, lastResult, targetScore,
-    timeLimit: serverTimeLimit
+    timeLimit: serverTimeLimit,
+    isTimerRunning
   } = state
 
   // ── UI 상태 ──────────────────────────────────────────────
@@ -610,13 +611,13 @@ export default function GameScreen() {
         <div className="timer-panel glass-panel">
           <div className="timer-label">남은 시간</div>
           <TimerRing
-            key={`${currentRound}-${timerActive}`}
+            key={currentRound}
             timeLimit={timerLimit}
-            active={timerActive}
+            active={timerActive || isTimerRunning}
           />
           <div className="timer-hint">빠를수록 유리!</div>
         </div>
-
+        
       </div>
     </div>
   )
