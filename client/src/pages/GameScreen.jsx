@@ -63,6 +63,7 @@ export default function GameScreen() {
   const [soundUnlocked, setSoundUnlocked] = useState(false)
   const isUnlockingRef = useRef(false)
   const isPlayingRef = useRef(false)
+  const hasPlayedIntroRef = useRef(false) // 인트로 중복 재생 방지 락
 
   const [answer, setAnswer] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
@@ -85,11 +86,9 @@ export default function GameScreen() {
   const tickTimersRef = useRef([])
   const stateChangeHandlerRef = useRef()
 
-  // 💡 기계음 박멸! 브라우저 내에서 가장 자연스러운 프리미엄 한국어 음성을 스캔하는 헬퍼 함수
   const getBestKoreanVoice = useCallback(() => {
     const voices = window.speechSynthesis.getVoices();
     const koreanVoices = voices.filter(v => v.lang.includes('ko'));
-    // 구글, 애플(Siri), 삼성 등에서 제공하는 '고품질(Natural/Premium)' 음성을 최우선으로 잡습니다.
     const bestVoice = koreanVoices.find(v => 
       v.name.includes('Natural') || 
       v.name.includes('Premium') || 
@@ -97,7 +96,7 @@ export default function GameScreen() {
       v.name.includes('Siri') ||
       v.name.includes('Yuna')
     );
-    return bestVoice || koreanVoices[0]; // 없으면 기본 한국어
+    return bestVoice || koreanVoices[0]; 
   }, []);
 
   const playTickSound = useCallback(() => {
@@ -144,9 +143,7 @@ export default function GameScreen() {
       });
     });
     
-    // 크롬 등 일부 브라우저는 초기에 보이스 목록을 늦게 불러오므로 미리 트리거
     window.speechSynthesis.onvoiceschanged = getBestKoreanVoice;
-    
     return () => { cancelled = true; playerRef.current?.destroy?.(); }
   }, [emit, clearTickTimers, getBestKoreanVoice]);
 
@@ -158,7 +155,6 @@ export default function GameScreen() {
     if (AudioContext) {
       try {
         const ctx = new AudioContext();
-        // 애플 권한 해제용 묵음 출력
         const unlockOsc = ctx.createOscillator();
         const unlockGain = ctx.createGain();
         unlockOsc.frequency.value = 1;
@@ -167,19 +163,6 @@ export default function GameScreen() {
         unlockGain.connect(ctx.destination);
         unlockOsc.start(0);
         unlockOsc.stop(0.1);
-
-        // 🎤 촌스러운 팡파르 완전 삭제, 바로 깔끔하고 사람 같은 안내 멘트 출력
-        if (currentRound === 0) {
-          window.speechSynthesis.cancel();
-          const msg = new SpeechSynthesisUtterance(
-            `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면, 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. 10 라운드 내에 가장 먼저 ${targetScore}점을 달성한 사람이 승리합니다. 자 이제 시작해볼까요?`
-          );
-          msg.lang = 'ko-KR';
-          msg.voice = getBestKoreanVoice();
-          msg.rate = 1.0; 
-          window.speechSynthesis.speak(msg);
-          setPhaseLabel('🎙️ 안내 방송 진행 중...');
-        }
       } catch(e) {}
     }
 
@@ -255,18 +238,17 @@ export default function GameScreen() {
     const startSeconds = Number(youtubeStart) || 0;
     const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
 
-    // 🎥 영상을 진짜로 가동시키는 실행 함수
     const executeVideoPlay = () => {
       if (roundTokenRef.current !== roundToken) return;
       
-      // 🚨 단두대 타이머는 반드시 "음성이 다 끝나고 영상 큐가 들어간 직후"부터 5초간 잽니다.
+      // 🚨 버퍼링 지연을 대비해 단두대 타이머를 10초로 넉넉하게 연장! (안 끝났는데 튕기는 버그 완벽 차단)
       failSafeTimerRef.current = setTimeout(() => {
         if (roundTokenRef.current === roundToken) {
           setIsPlaying(false);
           setTimerActive(false);
           emit('skip_round');
         }
-      }, 5000);
+      }, 10000); 
 
       if (playerRef.current?.loadVideoById) {
         playerRef.current.loadVideoById({ videoId: youtubeId, startSeconds, endSeconds });
@@ -278,36 +260,70 @@ export default function GameScreen() {
       }
     };
 
-    // 🎤 라운드 시작 주제 안내 (음성 이벤트 기반 큐잉)
-    if (currentRound > 0 && category) {
+    // 💡 [주제 안내 및 비디오 큐잉 체인]
+    const executeTopicAndVideo = () => {
+      if (category) {
+        window.speechSynthesis.cancel();
+        const msg = new SpeechSynthesisUtterance(category);
+        msg.lang = 'ko-KR';
+        msg.voice = getBestKoreanVoice();
+        msg.rate = 1.0; 
+        
+        // 성우가 주제 멘트를 "완전히 끝마친 직후" 정확히 1초 뒤에 음악 큐!
+        msg.onend = () => {
+          if (roundTokenRef.current === roundToken) {
+            setTimeout(() => {
+              if (roundTokenRef.current === roundToken) executeVideoPlay();
+            }, 1000); 
+          }
+        };
+
+        // TTS 에러 대비 최후의 보루
+        let ttsStarted = false;
+        msg.onstart = () => { ttsStarted = true; };
+        setTimeout(() => {
+          if (!ttsStarted && roundTokenRef.current === roundToken) executeVideoPlay();
+        }, 1000);
+
+        window.speechSynthesis.speak(msg);
+      } else {
+        executeVideoPlay();
+      }
+    };
+
+    // 💡 [오프닝 메인 멘트] 1라운드 진입 시 딱 1번만 실행!
+    if (currentRound === 1 && !hasPlayedIntroRef.current) {
+      hasPlayedIntroRef.current = true;
       window.speechSynthesis.cancel();
-      const msg = new SpeechSynthesisUtterance(category);
+      const msg = new SpeechSynthesisUtterance(
+        `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면, 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. 10 라운드 내에 가장 먼저 ${targetScore}점을 달성한 사람이 승리합니다. 자 이제 시작해볼까요?`
+      );
       msg.lang = 'ko-KR';
       msg.voice = getBestKoreanVoice();
       msg.rate = 1.0; 
       
-      // 💡 핵심: 억지 딜레이가 아니라, 음성이 "완전히 끝난 이벤트(onend)"를 감지하여 2초 뒤 실행!
+      // 오프닝 멘트가 "끝난 직후" 정확히 2초 뒤에 체인(주제 안내)으로 넘김!
       msg.onend = () => {
         if (roundTokenRef.current === roundToken) {
           setTimeout(() => {
-            if (roundTokenRef.current === roundToken) executeVideoPlay();
-          }, 2000); // 음성 끝나고 정확히 2초 뒤에 빵! 터집니다.
+            if (roundTokenRef.current === roundToken) executeTopicAndVideo();
+          }, 2000); 
         }
       };
 
-      // 만약 브라우저 오류로 음성이 시작조차 안 되면 무한 정지되므로 1.5초 후 강제 실행하는 보험
       let ttsStarted = false;
       msg.onstart = () => { ttsStarted = true; };
       setTimeout(() => {
-        if (!ttsStarted && roundTokenRef.current === roundToken) executeVideoPlay();
-      }, 1500);
+        if (!ttsStarted && roundTokenRef.current === roundToken) executeTopicAndVideo();
+      }, 3000);
 
+      setPhaseLabel('🎙️ 안내 방송 진행 중...');
       window.speechSynthesis.speak(msg);
-    } else {
-      executeVideoPlay();
+    } else if (currentRound > 0) {
+      executeTopicAndVideo();
     }
 
-  }, [roundActive, youtubeId, youtubeStart, youtubeEnd, soundUnlocked, emit, clearTickTimers, category, currentRound, getBestKoreanVoice]);
+  }, [roundActive, youtubeId, youtubeStart, youtubeEnd, soundUnlocked, emit, clearTickTimers, category, currentRound, targetScore, getBestKoreanVoice]);
 
   useEffect(() => {
     if (roundActive && soundUnlocked && inputRef.current) {
@@ -460,7 +476,7 @@ export default function GameScreen() {
 
               <div className="youtube-sound-panel">
                 {mediaLoaded ? (
-                  <WaveformVisualizer isPlaying={isPlaying || (currentRound === 0 && soundUnlocked)} />
+                  <WaveformVisualizer isPlaying={isPlaying} />
                 ) : (
                   <div className="audio-loading">
                     <div className="loading-spinner" />
