@@ -59,21 +59,21 @@ export default function TitleScreen() {
               onClick={() => setMode('create')}
               disabled={!connected}
             >
-              🚀 방 만들기
+              방 만들기
             </button>
             <button
               className="btn btn-secondary btn-lg cta-btn"
               onClick={() => setMode('join')}
               disabled={!connected}
             >
-              🔭 방 참가하기
+              방 참가하기
             </button>
           </div>
         ) : (
           <div className="entry-panel glass-panel animate-scaleIn">
             <div className="entry-header">
               <button className="back-btn" onClick={() => { setMode(null); setError('') }}>← 뒤로</button>
-              <h2>{mode === 'create' ? '🚀 새 방 만들기' : '🔭 방 참가하기'}</h2>
+              <h2>{mode === 'create' ? '새 방 만들기' : '방 참가하기'}</h2>
             </div>
 
             <div className="avatar-row">
@@ -116,19 +116,11 @@ export default function TitleScreen() {
               onClick={handleStart}
               disabled={loading || !connected}
             >
-              {loading ? '⏳ 접속 중...' : mode === 'create' ? '🚀 방 생성!' : '🔭 입장하기!'}
+              {loading ? '⏳ 접속 중...' : mode === 'create' ? '방 생성' : '입장하기'}
             </button>
           </div>
         )}
-
-        {/* How to play */}
-        <div className="howto animate-fadeInUp" style={{ animationDelay: '0.4s' }}>
-          <div className="howto-item"><span>🎧</span><p>소리를 듣고</p></div>
-          <div className="howto-arrow">→</div>
-          <div className="howto-item"><span>⌨️</span><p>정답을 입력</p></div>
-          <div className="howto-arrow">→</div>
-          <div className="howto-item"><span>🏆</span><p>점수 획득!</p></div>
-        </div>
+        
       </div>
     </div>
   )
