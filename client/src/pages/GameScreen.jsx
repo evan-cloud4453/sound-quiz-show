@@ -1,8 +1,4 @@
-// client/src/pages/GameScreen.jsx — v3
-// 수정사항:
-//   1. TTS가 안 들리는 문제 → speak() 호출 전 AudioContext resume + iOS 워밍업
-//   2. 타이머 후 15초 멈춤 → clearRoomTimers가 startRound에서 항상 실행되므로 서버 측 해결
-//   3. 클라이언트는 서버 timer_start 수신 시에만 타이머 UI 시작
+// client/src/pages/GameScreen.jsx
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGame } from '../utils/GameContext'
