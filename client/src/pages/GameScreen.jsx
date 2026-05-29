@@ -83,8 +83,22 @@ export default function GameScreen() {
   const failSafeTimerRef = useRef(null)
   const audioStopTimerRef = useRef(null)
   const tickTimersRef = useRef([])
-
   const stateChangeHandlerRef = useRef()
+
+  // 💡 기계음 박멸! 브라우저 내에서 가장 자연스러운 프리미엄 한국어 음성을 스캔하는 헬퍼 함수
+  const getBestKoreanVoice = useCallback(() => {
+    const voices = window.speechSynthesis.getVoices();
+    const koreanVoices = voices.filter(v => v.lang.includes('ko'));
+    // 구글, 애플(Siri), 삼성 등에서 제공하는 '고품질(Natural/Premium)' 음성을 최우선으로 잡습니다.
+    const bestVoice = koreanVoices.find(v => 
+      v.name.includes('Natural') || 
+      v.name.includes('Premium') || 
+      v.name.includes('Google') || 
+      v.name.includes('Siri') ||
+      v.name.includes('Yuna')
+    );
+    return bestVoice || koreanVoices[0]; // 없으면 기본 한국어
+  }, []);
 
   const playTickSound = useCallback(() => {
     try {
@@ -129,8 +143,12 @@ export default function GameScreen() {
         }
       });
     });
+    
+    // 크롬 등 일부 브라우저는 초기에 보이스 목록을 늦게 불러오므로 미리 트리거
+    window.speechSynthesis.onvoiceschanged = getBestKoreanVoice;
+    
     return () => { cancelled = true; playerRef.current?.destroy?.(); }
-  }, [emit, clearTickTimers]);
+  }, [emit, clearTickTimers, getBestKoreanVoice]);
 
   const handleUnlock = () => {
     setSoundUnlocked(true);
@@ -140,8 +158,7 @@ export default function GameScreen() {
     if (AudioContext) {
       try {
         const ctx = new AudioContext();
-        
-        // 1. 애플 권한 해제용 묵음 출력
+        // 애플 권한 해제용 묵음 출력
         const unlockOsc = ctx.createOscillator();
         const unlockGain = ctx.createGain();
         unlockOsc.frequency.value = 1;
@@ -151,47 +168,16 @@ export default function GameScreen() {
         unlockOsc.start(0);
         unlockOsc.stop(0.1);
 
-        // 🎤 2. 오프닝 연출: 게임 대기 중(currentRound === 0)일 때만 팡파르 및 육성 안내 출력
+        // 🎤 촌스러운 팡파르 완전 삭제, 바로 깔끔하고 사람 같은 안내 멘트 출력
         if (currentRound === 0) {
-          const t = ctx.currentTime;
-          const playNote = (freq, startOffset, dur) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'triangle';
-            osc.frequency.value = freq;
-            gain.gain.setValueAtTime(0.15, t + startOffset);
-            gain.gain.exponentialRampToValueAtTime(0.01, t + startOffset + dur);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(t + startOffset);
-            osc.stop(t + startOffset + dur);
-          };
-
-          // 빠라빠람~
-          playNote(392.00, 0, 0.15);    // G4
-          playNote(392.00, 0.15, 0.15); // G4
-          playNote(392.00, 0.3, 0.15);  // G4
-          playNote(523.25, 0.45, 0.4);  // C5
-          // 빠라바람~
-          playNote(349.23, 0.9, 0.15);  // F4
-          playNote(349.23, 1.05, 0.15); // F4
-          playNote(349.23, 1.2, 0.15);  // F4
-          playNote(466.16, 1.35, 0.4);  // Bb4
-          // 빰빰!
-          playNote(523.25, 1.8, 0.2);   // C5
-          playNote(523.25, 2.1, 0.4);   // C5
-
-          // 안내 멘트 육성 재생 (팡파르 끝난 직후 2.5초 뒤 시작)
-          setTimeout(() => {
-            window.speechSynthesis.cancel();
-            const msg = new SpeechSynthesisUtterance(
-              `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면, 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. 10 라운드 내에 가장 먼저 ${targetScore}점을 달성한 사람이 승리합니다. 자, 이제 시작해볼까요?`
-            );
-            msg.lang = 'ko-KR';
-            msg.rate = 1.1; // 약간 경쾌한 속도
-            window.speechSynthesis.speak(msg);
-          }, 2500);
-
+          window.speechSynthesis.cancel();
+          const msg = new SpeechSynthesisUtterance(
+            `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면, 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. 10 라운드 내에 가장 먼저 ${targetScore}점을 달성한 사람이 승리합니다. 자 이제 시작해볼까요?`
+          );
+          msg.lang = 'ko-KR';
+          msg.voice = getBestKoreanVoice();
+          msg.rate = 1.0; 
+          window.speechSynthesis.speak(msg);
           setPhaseLabel('🎙️ 안내 방송 진행 중...');
         }
       } catch(e) {}
@@ -201,13 +187,6 @@ export default function GameScreen() {
       playerRef.current.playVideo();
     }
   };
-
-  // 라운드가 시작되면 혹시라도 멘트가 겹치지 않게 강제로 육성을 꺼버림
-  useEffect(() => {
-    if (currentRound > 0) {
-      window.speechSynthesis.cancel();
-    }
-  }, [currentRound]);
 
   stateChangeHandlerRef.current = (event) => {
     if (isUnlockingRef.current && event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
@@ -246,7 +225,6 @@ export default function GameScreen() {
     }
   };
 
-  // 🔽 이 useEffect 전체를 찾아서 아래 코드로 싹 교체하세요!
   useEffect(() => {
     if (!roundActive || !soundUnlocked) return;
 
@@ -274,40 +252,62 @@ export default function GameScreen() {
       return;
     }
 
-    // 🎤 [추가된 연출] 1. 카테고리(주제) 음성 안내 (1라운드 이상일 때만)
-    let playDelay = 150; // 기본 딜레이
-    if (currentRound > 0 && category) {
-      window.speechSynthesis.cancel(); // 혹시 밀린 음성이 있으면 컷
-      const msg = new SpeechSynthesisUtterance(category);
-      msg.lang = 'ko-KR';
-      msg.rate = 1.3; // 너무 늘어지지 않게 약간 빠르고 경쾌하게!
-      window.speechSynthesis.speak(msg);
-      
-      playDelay = 1500; // 성우가 카테고리를 읽을 시간(1.5초) 동안 음악 대기!
-    }
-
-    // 🚨 [수정됨] 2. 성우 멘트 시간(1.5초)이 생겼으니, 3.5초 단두대 타이머도 5초로 넉넉하게 연장!
-    failSafeTimerRef.current = setTimeout(() => {
-      setIsPlaying(false);
-      setTimerActive(false);
-      emit('skip_round');
-    }, 5000); 
-
     const startSeconds = Number(youtubeStart) || 0;
     const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
 
-    if (playerRef.current?.loadVideoById) {
-      playerRef.current.loadVideoById({ videoId: youtubeId, startSeconds, endSeconds });
+    // 🎥 영상을 진짜로 가동시키는 실행 함수
+    const executeVideoPlay = () => {
+      if (roundTokenRef.current !== roundToken) return;
       
-      // 🎶 3. 계산된 딜레이(1.5초) 뒤에 유튜브 음악 큐!
-      setTimeout(() => {
+      // 🚨 단두대 타이머는 반드시 "음성이 다 끝나고 영상 큐가 들어간 직후"부터 5초간 잽니다.
+      failSafeTimerRef.current = setTimeout(() => {
         if (roundTokenRef.current === roundToken) {
-          try { playerRef.current?.playVideo(); } catch(e){}
+          setIsPlaying(false);
+          setTimerActive(false);
+          emit('skip_round');
         }
-      }, playDelay);
+      }, 5000);
+
+      if (playerRef.current?.loadVideoById) {
+        playerRef.current.loadVideoById({ videoId: youtubeId, startSeconds, endSeconds });
+        setTimeout(() => {
+          if (roundTokenRef.current === roundToken) {
+            try { playerRef.current?.playVideo(); } catch(e){}
+          }
+        }, 150);
+      }
+    };
+
+    // 🎤 라운드 시작 주제 안내 (음성 이벤트 기반 큐잉)
+    if (currentRound > 0 && category) {
+      window.speechSynthesis.cancel();
+      const msg = new SpeechSynthesisUtterance(category);
+      msg.lang = 'ko-KR';
+      msg.voice = getBestKoreanVoice();
+      msg.rate = 1.0; 
+      
+      // 💡 핵심: 억지 딜레이가 아니라, 음성이 "완전히 끝난 이벤트(onend)"를 감지하여 2초 뒤 실행!
+      msg.onend = () => {
+        if (roundTokenRef.current === roundToken) {
+          setTimeout(() => {
+            if (roundTokenRef.current === roundToken) executeVideoPlay();
+          }, 2000); // 음성 끝나고 정확히 2초 뒤에 빵! 터집니다.
+        }
+      };
+
+      // 만약 브라우저 오류로 음성이 시작조차 안 되면 무한 정지되므로 1.5초 후 강제 실행하는 보험
+      let ttsStarted = false;
+      msg.onstart = () => { ttsStarted = true; };
+      setTimeout(() => {
+        if (!ttsStarted && roundTokenRef.current === roundToken) executeVideoPlay();
+      }, 1500);
+
+      window.speechSynthesis.speak(msg);
+    } else {
+      executeVideoPlay();
     }
-  // 🚨 의존성 배열에 category와 currentRound 추가를 잊지 마세요!
-  }, [roundActive, youtubeId, youtubeStart, youtubeEnd, soundUnlocked, emit, clearTickTimers, category, currentRound]);
+
+  }, [roundActive, youtubeId, youtubeStart, youtubeEnd, soundUnlocked, emit, clearTickTimers, category, currentRound, getBestKoreanVoice]);
 
   useEffect(() => {
     if (roundActive && soundUnlocked && inputRef.current) {
