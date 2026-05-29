@@ -63,7 +63,7 @@ export default function GameScreen() {
   const [soundUnlocked, setSoundUnlocked] = useState(false)
   const isUnlockingRef = useRef(false)
   const isPlayingRef = useRef(false)
-  const hasPlayedIntroRef = useRef(false) // 인트로 중복 재생 방지 락
+  const hasPlayedIntroRef = useRef(false)
 
   const [answer, setAnswer] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
@@ -83,18 +83,16 @@ export default function GameScreen() {
 
   const failSafeTimerRef = useRef(null)
   const audioStopTimerRef = useRef(null)
-  const tickTimersRef = useRef([])
+  const tickIntervalRef = useRef(null)
+  const utteranceRef = useRef(null) 
   const stateChangeHandlerRef = useRef()
 
   const getBestKoreanVoice = useCallback(() => {
     const voices = window.speechSynthesis.getVoices();
     const koreanVoices = voices.filter(v => v.lang.includes('ko'));
     const bestVoice = koreanVoices.find(v => 
-      v.name.includes('Natural') || 
-      v.name.includes('Premium') || 
-      v.name.includes('Google') || 
-      v.name.includes('Siri') ||
-      v.name.includes('Yuna')
+      v.name.includes('Natural') || v.name.includes('Premium') || 
+      v.name.includes('Google') || v.name.includes('Siri') || v.name.includes('Yuna')
     );
     return bestVoice || koreanVoices[0]; 
   }, []);
@@ -118,8 +116,8 @@ export default function GameScreen() {
   }, [])
 
   const clearTickTimers = useCallback(() => {
-    tickTimersRef.current.forEach(t => clearTimeout(t))
-    tickTimersRef.current = []
+    if (tickIntervalRef.current) clearInterval(tickIntervalRef.current);
+    tickIntervalRef.current = null;
   }, [])
 
   useEffect(() => {
@@ -127,8 +125,7 @@ export default function GameScreen() {
     loadYouTubeApi().then(YT => {
       if (cancelled) return;
       playerRef.current = new YT.Player(playerHostIdRef.current, {
-        width: 220, height: 200,
-        videoId: 'jNQXAC9IVRw', 
+        width: 220, height: 200, videoId: 'jNQXAC9IVRw', 
         playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, playsinline: 1, rel: 0 },
         events: {
           onReady: () => setMediaLoaded(true),
@@ -142,7 +139,6 @@ export default function GameScreen() {
         }
       });
     });
-    
     window.speechSynthesis.onvoiceschanged = getBestKoreanVoice;
     return () => { cancelled = true; playerRef.current?.destroy?.(); }
   }, [emit, clearTickTimers, getBestKoreanVoice]);
@@ -155,30 +151,27 @@ export default function GameScreen() {
     if (AudioContext) {
       try {
         const ctx = new AudioContext();
-        const t = ctx.currentTime;
+        // 💡 소리가 먹히지 않도록 약간의 시간 오프셋(0.05)과 볼륨(0.2)을 증가시킨 파티 아르페지오
+        const t = ctx.currentTime + 0.05; 
         const playNote = (freq, offset) => {
           const osc = ctx.createOscillator(); 
           const gain = ctx.createGain();
           osc.type = 'sine'; 
           osc.frequency.value = freq;
-          gain.gain.setValueAtTime(0.1, t + offset); 
+          gain.gain.setValueAtTime(0.2, t + offset); 
           gain.gain.exponentialRampToValueAtTime(0.01, t + offset + 0.1);
           osc.connect(gain); 
           gain.connect(ctx.destination);
           osc.start(t + offset); 
-          osc.stop(t + offset + 0.1);
+          osc.stop(t + offset + 0.15);
         };
-        // 파티 입장 느낌의 실로폰 4단음 (도-미-솔-도)
         playNote(523.25, 0);   
         playNote(659.25, 0.1); 
         playNote(783.99, 0.2); 
-        playNote(1046.50, 0.3);
+        playNote(1046.50, 0.3); 
       } catch(e) {}
     }
-
-    if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
-      playerRef.current.playVideo();
-    }
+    if (playerRef.current && typeof playerRef.current.playVideo === 'function') playerRef.current.playVideo();
   };
 
   stateChangeHandlerRef.current = (event) => {
@@ -202,14 +195,21 @@ export default function GameScreen() {
       }
 
       clearTimeout(audioStopTimerRef.current);
+      // 기존에 잘 작동하던 10초 뒤 정지 + 5초간 틱틱 사운드 로직 유지
       audioStopTimerRef.current = setTimeout(() => {
         try { playerRef.current?.pauseVideo?.(); } catch (e) {}
         setIsPlaying(false);
         
         clearTickTimers();
-        for (let i = 0; i < 5; i++) {
-          tickTimersRef.current.push(setTimeout(() => playTickSound(), i * 1000));
-        }
+        let tickCount = 0;
+        tickIntervalRef.current = setInterval(() => {
+          if (tickCount >= 5) {
+            clearInterval(tickIntervalRef.current);
+            return;
+          }
+          playTickSound();
+          tickCount++;
+        }, 1000);
       }, 10000);
     }
 
@@ -224,154 +224,114 @@ export default function GameScreen() {
     const roundToken = roundTokenRef.current + 1;
     roundTokenRef.current = roundToken;
 
-    setAnswer('');
-    setSubmitted(false);
-    setFlashWrong(false);
-    setIsPlaying(false);
-    isPlayingRef.current = false;
-    isUnlockingRef.current = false; 
-    setTimerActive(false);
-    setShowResult(false);
-    setPlaybackBlocked(false);
-    setPlaybackError(false);
+    setAnswer(''); setSubmitted(false); setFlashWrong(false);
+    setIsPlaying(false); isPlayingRef.current = false; isUnlockingRef.current = false; 
+    setTimerActive(false); setShowResult(false); setPlaybackBlocked(false); setPlaybackError(false);
     setPhaseLabel('오디오 세팅 중...');
 
-    clearTimeout(failSafeTimerRef.current);
     clearTimeout(audioStopTimerRef.current);
     clearTickTimers();
 
-    if (!youtubeId) {
-      emit('skip_round');
-      return;
-    }
+    if (!youtubeId) { emit('skip_round'); return; }
 
     const startSeconds = Number(youtubeStart) || 0;
     const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
 
     const executeVideoPlay = () => {
-      // 1. 카테고리 주제를 안내하고 1초 뒤 유튜브를 트는 함수
+      if (roundTokenRef.current !== roundToken) return;
+      
+      // 10초 대기 후 재생 실패 시 스킵 (기존 유지)
+      failSafeTimerRef.current = setTimeout(() => {
+        if (roundTokenRef.current === roundToken) {
+          setIsPlaying(false); setTimerActive(false); emit('skip_round');
+        }
+      }, 10000); 
+
+      if (playerRef.current?.loadVideoById) {
+        playerRef.current.loadVideoById({ videoId: youtubeId, startSeconds, endSeconds });
+        setTimeout(() => {
+          if (roundTokenRef.current === roundToken) {
+            try { playerRef.current?.playVideo(); } catch(e){}
+          }
+        }, 150);
+      }
+    };
+
     const playTopicAndVideo = () => {
       if (category && roundTokenRef.current === roundToken) {
         window.speechSynthesis.cancel();
-        const msg = new SpeechSynthesisUtterance(category);
-        msg.lang = 'ko-KR';
-        // msg.voice = getBestKoreanVoice(); // (만약 프리미엄 보이스 함수가 있다면 주석 해제)
-        msg.rate = 1.0; 
+        utteranceRef.current = new SpeechSynthesisUtterance(category);
+        utteranceRef.current.lang = 'ko-KR';
+        utteranceRef.current.voice = getBestKoreanVoice();
+        utteranceRef.current.rate = 1.0; 
         
-        // 주제 안내 음성이 완전히 끝난(onend) 직후 1초 대기 후 음악 큐!
-        msg.onend = () => {
-          if (roundTokenRef.current === roundToken) {
+        let isExecuted = false;
+
+        // 💡 TTS 멘트가 정상적으로 완전히 종료되었을 때 (1초 대기 후 음악)
+        utteranceRef.current.onend = () => {
+          if (!isExecuted && roundTokenRef.current === roundToken) {
+            isExecuted = true;
             setTimeout(() => executeVideoPlay(), 1000); 
           }
         };
-        window.speechSynthesis.speak(msg);
+
+        // 🚨 무적 방어막: 브라우저가 onend 신호를 먹어버려도 3.5초 뒤 무조건 강제 실행
+        setTimeout(() => {
+          if (!isExecuted && roundTokenRef.current === roundToken) {
+            isExecuted = true;
+            executeVideoPlay();
+          }
+        }, 3500);
+
+        window.speechSynthesis.speak(utteranceRef.current);
       } else {
         executeVideoPlay();
       }
     };
 
-    // 2. 1라운드(오프닝)와 2라운드 이상을 구분하여 실행
     if (currentRound === 1 && !hasPlayedIntroRef.current) {
       hasPlayedIntroRef.current = true;
       window.speechSynthesis.cancel();
-      const msg = new SpeechSynthesisUtterance(
+      utteranceRef.current = new SpeechSynthesisUtterance(
         `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면, 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. 10 라운드 내에 가장 먼저 ${targetScore}점을 달성한 사람이 승리합니다. 자, 이제 시작해볼까요?`
       );
-      msg.lang = 'ko-KR';
-      msg.rate = 1.0; 
+      utteranceRef.current.lang = 'ko-KR';
+      utteranceRef.current.voice = getBestKoreanVoice();
+      utteranceRef.current.rate = 1.0; 
       
-      // 오프닝 안내가 완전히 끝난 직후 2초 대기 후 주제 안내로 바통 터치!
-      msg.onend = () => {
-        if (roundTokenRef.current === roundToken) {
+      let isExecuted = false;
+
+      // 💡 1라운드 오프닝 멘트가 정상적으로 끝났을 때 (2초 대기 후 주제 안내)
+      utteranceRef.current.onend = () => {
+        if (!isExecuted && roundTokenRef.current === roundToken) {
+          isExecuted = true;
           setTimeout(() => playTopicAndVideo(), 2000); 
         }
       };
 
-      setPhaseLabel('🎙️ 오프닝 안내 방송 중...');
-      window.speechSynthesis.speak(msg);
-    } else if (currentRound > 0) {
-      // 2라운드부터는 오프닝 없이 바로 주제 안내부터 실행!
-      playTopicAndVideo();
-    }
-    };
-
-    // 💡 [주제 안내 및 비디오 큐잉 체인]
-    const executeTopicAndVideo = () => {
-      if (category) {
-        window.speechSynthesis.cancel();
-        const msg = new SpeechSynthesisUtterance(category);
-        msg.lang = 'ko-KR';
-        msg.voice = getBestKoreanVoice();
-        msg.rate = 1.0; 
-        
-        // 성우가 주제 멘트를 "완전히 끝마친 직후" 정확히 1초 뒤에 음악 큐!
-        msg.onend = () => {
-          if (roundTokenRef.current === roundToken) {
-            setTimeout(() => {
-              if (roundTokenRef.current === roundToken) executeVideoPlay();
-            }, 1000); 
-          }
-        };
-
-        // TTS 에러 대비 최후의 보루
-        let ttsStarted = false;
-        msg.onstart = () => { ttsStarted = true; };
-        setTimeout(() => {
-          if (!ttsStarted && roundTokenRef.current === roundToken) executeVideoPlay();
-        }, 1000);
-
-        window.speechSynthesis.speak(msg);
-      } else {
-        executeVideoPlay();
-      }
-    };
-
-    // 💡 [오프닝 메인 멘트] 1라운드 진입 시 딱 1번만 실행!
-    if (currentRound === 1 && !hasPlayedIntroRef.current) {
-      hasPlayedIntroRef.current = true;
-      window.speechSynthesis.cancel();
-      const msg = new SpeechSynthesisUtterance(
-        `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면, 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. 10 라운드 내에 가장 먼저 ${targetScore}점을 달성한 사람이 승리합니다. 자 이제 시작해볼까요?`
-      );
-      msg.lang = 'ko-KR';
-      msg.voice = getBestKoreanVoice();
-      msg.rate = 1.0; 
-      
-      // 오프닝 멘트가 "끝난 직후" 정확히 2초 뒤에 체인(주제 안내)으로 넘김!
-      msg.onend = () => {
-        if (roundTokenRef.current === roundToken) {
-          setTimeout(() => {
-            if (roundTokenRef.current === roundToken) executeTopicAndVideo();
-          }, 2000); 
-        }
-      };
-
-      let ttsStarted = false;
-      msg.onstart = () => { ttsStarted = true; };
+      // 🚨 무적 방어막: 긴 멘트 중단 시 15초 뒤 무조건 강제 실행
       setTimeout(() => {
-        if (!ttsStarted && roundTokenRef.current === roundToken) executeTopicAndVideo();
-      }, 3000);
+        if (!isExecuted && roundTokenRef.current === roundToken) {
+          isExecuted = true;
+          playTopicAndVideo();
+        }
+      }, 15000);
 
-      setPhaseLabel('🎙️ 안내 방송 진행 중...');
-      window.speechSynthesis.speak(msg);
+      setPhaseLabel('🎙️ 오프닝 안내 방송 중...');
+      window.speechSynthesis.speak(utteranceRef.current);
     } else if (currentRound > 0) {
-      executeTopicAndVideo();
+      playTopicAndVideo();
     }
 
   }, [roundActive, youtubeId, youtubeStart, youtubeEnd, soundUnlocked, emit, clearTickTimers, category, currentRound, targetScore, getBestKoreanVoice]);
 
   useEffect(() => {
-    if (roundActive && soundUnlocked && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 300)
-    }
+    if (roundActive && soundUnlocked && inputRef.current) setTimeout(() => inputRef.current?.focus(), 300);
   }, [roundActive, soundUnlocked])
 
   useEffect(() => {
     if (!roundActive) {
-      setTimerActive(false);
-      clearTimeout(failSafeTimerRef.current);
-      clearTimeout(audioStopTimerRef.current);
-      clearTickTimers();
+      setTimerActive(false); clearTimeout(failSafeTimerRef.current); clearTimeout(audioStopTimerRef.current); clearTickTimers();
     }
   }, [roundActive, clearTickTimers])
 
@@ -381,9 +341,7 @@ export default function GameScreen() {
       if (!isRoundResult) return undefined;
 
       try { playerRef.current?.pauseVideo?.(); } catch (error) {}
-      
-      setIsPlaying(false);
-      clearTickTimers(); 
+      setIsPlaying(false); clearTickTimers(); 
 
       setShowResult(true);
       setPhaseLabel(lastResult.correct ? '🎉 정답!' : '⏰ 라운드 종료!');
@@ -395,21 +353,15 @@ export default function GameScreen() {
 
   const handleSubmit = useCallback(() => {
     if (!answer.trim() || submitted || !roundActive) return;
-    setSubmitted(true);
-    submitAnswer(answer.trim());
+    setSubmitted(true); submitAnswer(answer.trim());
   }, [answer, submitted, roundActive, submitAnswer])
 
-  const handleKey = (e) => {
-    if (e.key === 'Enter') handleSubmit()
-  }
+  const handleKey = (e) => { if (e.key === 'Enter') handleSubmit() }
 
   useEffect(() => {
     if (lastResult && !lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) {
-      setSubmitted(false);
-      setAnswer('');
-      setFlashWrong(true);
-      setTimeout(() => setFlashWrong(false), 600);
-      inputRef.current?.focus();
+      setSubmitted(false); setAnswer(''); setFlashWrong(true);
+      setTimeout(() => setFlashWrong(false), 600); inputRef.current?.focus();
     }
   }, [lastResult])
 
@@ -418,7 +370,6 @@ export default function GameScreen() {
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
-
       {!soundUnlocked && (
         <div style={{
           position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
@@ -558,7 +509,7 @@ export default function GameScreen() {
                 )}
               </>
             ) : (
-              <p className="waiting-next">⏳ {currentRound === 0 ? '오프닝 안내 방송 중...' : '다음 라운드 준비 중...'}</p>
+              <p className="waiting-next">⏳ {currentRound === 1 && !hasPlayedIntroRef.current ? '오프닝 안내 방송 중...' : '다음 라운드 준비 중...'}</p>
             )}
           </div>
         </div>
