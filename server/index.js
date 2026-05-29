@@ -1,5 +1,3 @@
-// sever/index.js
-
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -113,22 +111,22 @@ function smartGrade(submitted, answers) {
 
 function getRoomState(room) {
   return {
-    roomCode:     room.code,
-    hostId:       room.hostId,
-    players:      room.players.map(p => ({
+    roomCode:      room.code,
+    hostId:        room.hostId,
+    players:       room.players.map(p => ({
       id: p.id, nickname: p.nickname,
       score: p.score, isReady: p.isReady,
       isHost: p.id === room.hostId
     })),
-    status:       room.status,
-    currentRound: room.currentRound,
-    totalRounds:  room.totalRounds,
-    targetScore:  room.targetScore
+    status:        room.status,
+    currentRound:  room.currentRound,
+    totalRounds:   room.totalRounds,
+    targetScore:   room.targetScore,
+    isTimerRunning: !!room.roundTimer // 💡 프론트엔드 타이머 애니메이션 트리거
   };
 }
 
 // ── 타이머 헬퍼 ───────────────────────────────────────────────
-// 방의 모든 타이머를 한 번에 정리
 function clearRoomTimers(room) {
   clearTimeout(room.roundTimer);
   clearTimeout(room.fallbackTimer);
@@ -136,11 +134,9 @@ function clearRoomTimers(room) {
   room.fallbackTimer = null;
 }
 
-// music_started 수신 시 라운드 타이머 시작 (1회만)
 function startRoundTimer(room) {
-  if (room.roundTimer) return; // 이미 시작됨
+  if (room.roundTimer) return;
 
-  // fallback은 이제 필요 없으므로 해제
   clearTimeout(room.fallbackTimer);
   room.fallbackTimer = null;
 
@@ -162,9 +158,8 @@ function startRoundTimer(room) {
     setTimeout(() => checkEndOrNextRound(room), 2500);
   }, ROUND_TIME_LIMIT * 1000);
 
-  // 클라이언트 UI 타이머 동기화
   io.to(room.code).emit('timer_start', { timeLimit: ROUND_TIME_LIMIT });
-  io.to(room.code).emit('room_update', getRoomState(room));
+  io.to(room.code).emit('room_update', getRoomState(room)); // 💡 타이머 시작 즉시 상태 갱신
   console.log(`[타이머 시작] 방 ${room.code} 라운드 ${room.currentRound} — ${ROUND_TIME_LIMIT}초`);
 }
 
@@ -253,16 +248,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ★ 클라이언트 음악 재생 시작 신호
   socket.on('music_started', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.status !== 'PLAYING') return;
       if (room.answeredThisRound)             return;
-      if (room.musicStartedSockets.has(socket.id)) return; // 중복 방지
+      if (room.musicStartedSockets.has(socket.id)) return;
       room.musicStartedSockets.add(socket.id);
 
-      startRoundTimer(room); // fallback 해제 + 실제 타이머 시작
+      startRoundTimer(room); 
     } catch (e) {
       console.error('music_started 오류:', e);
     }
@@ -353,18 +347,17 @@ io.on('connection', (socket) => {
     }
 
     io.to(roomCode).emit('room_update', getRoomState(room));
+    if (room.status === 'PLAYING' && room.players.length < 1) endGame(room);
   });
 });
 
-// ── 라운드 시작 ───────────────────────────────────────────────
 function startRound(room) {
-  // ★ 반드시 이전 타이머 모두 정리 후 시작
   clearRoomTimers(room);
 
-  room.currentRound        += 1;
+  room.currentRound         += 1;
   room.answeredThisRound    = false;
   room.firstCorrectPlayerId = null;
-  room.musicStartedSockets  = new Set(); // 라운드마다 초기화
+  room.musicStartedSockets  = new Set();
 
   const question = room.questions[room.currentRound - 1];
   if (!question) return endGame(room);
@@ -382,10 +375,7 @@ function startRound(room) {
 
   io.to(room.code).emit('room_update', getRoomState(room));
 
-  // fallback: music_started가 안 오는 경우 강제 타이머 시작
-  // 1라운드: 팡파레(2.4s) + 오프닝TTS(~18s) + 2초 + 주제TTS(~3s) + 1초 = ~27초
-  // 2라운드~: 주제TTS(~3s) + 1초 + 로딩(~3s) = ~8초
-  const fallbackDelay = room.currentRound === 1 ? 30000 : 10000;
+  const fallbackDelay = room.currentRound === 1 ? 40000 : 15000;
 
   room.fallbackTimer = setTimeout(() => {
     room.fallbackTimer = null;
@@ -394,8 +384,6 @@ function startRound(room) {
       startRoundTimer(room);
     }
   }, fallbackDelay);
-
-  console.log(`[라운드 ${room.currentRound}] 방 ${room.code} — ${question.answers[0]}`);
 }
 
 function checkEndOrNextRound(room) {
@@ -403,7 +391,7 @@ function checkEndOrNextRound(room) {
   if (winner || room.currentRound >= room.questions.length) {
     endGame(room);
   } else {
-    startRound(room); // ← clearRoomTimers가 startRound 안에서 호출됨
+    startRound(room);
   }
 }
 
@@ -412,10 +400,11 @@ function endGame(room) {
 
   const finalScores = [...room.players].sort((a, b) => b.score - a.score);
   let winner = null;
+  
   if (finalScores.length > 0 && finalScores[0].score > 0) {
     const top      = finalScores[0].score;
     const topGroup = finalScores.filter(p => p.score === top);
-    if (topGroup.length === 1) winner = topGroup[0];
+    if (topGroup.length === 1) winner = topGroup[0]; // 무승부 판정 완벽 유지
   }
 
   room.status       = 'WAITING';
