@@ -193,13 +193,13 @@ io.on('connection', (socket) => {
     try {
       room = rooms.get(socket.data.roomCode);
       if (!room) return cb?.({ error: '방을 찾을 수 없습니다.' });
-      if (room.hostId !== socket.id) return cb?.({ error: '방장만 게임을 시작할 수 있습니다.' });
-      if (room.players.length < 1) return cb?.({ error: '최소 1명 이상 필요합니다.' });
-      if (room.isStarting) return cb?.({ error: '게임을 시작하는 중입니다. 잠시만 기다려주세요.' });
+      if (room.hostId !== socket.id) return cb?.({ error: '방장만 게임 시작 가능.' });
+      if (room.players.length < 1) return cb?.({ error: '최소 1명 이상 필요.' });
+      if (room.isStarting) return cb?.({ error: '게임을 시작하는 중입니다.' });
 
       const questions = getRandomQuestions(ROUND_COUNT);
       if (questions.length === 0) {
-        return cb?.({ error: '출제 가능한 문제가 없습니다. quizData.js에 실제 유튜브 ID를 입력해주세요.' });
+        return cb?.({ error: '출제 가능한 문제가 없습니다.' });
       }
 
       room.isStarting = true;
@@ -215,8 +215,8 @@ io.on('connection', (socket) => {
 
       cb?.({ success: true });
 
-      // 🎤 [오프닝 연출 딜레이] 프론트엔드에서 팡파르와 안내 멘트(15초)가 끝날 때까지 16초 대기 후 1라운드 시작!
-      setTimeout(() => startRound(room), 16000);
+      // 서버 대기는 없애고 1.5초 뒤 바로 1라운드 큐 발송 (프론트가 알아서 안내멘트 재생 후 소리 가동)
+      setTimeout(() => startRound(room), 1500);
 
     } catch (e) {
       console.error(e);
@@ -425,6 +425,8 @@ function startRound(room) {
 
     io.to(room.code).emit('room_update', getRoomState(room));
 
+    // 🚨 1라운드는 오프닝 TTS가 길기 때문에 35초 대기, 나머지는 15초 대기!
+    const timeoutDuration = room.currentRound === 1 ? 35000 : 15000;
     room.loadingTimeoutTimer = setTimeout(() => {
       try {
         if (room.status === 'PLAYING' && !room.roundTimer && !room.answeredThisRound) {
@@ -443,7 +445,7 @@ function startRound(room) {
       } catch (e) {
         checkEndOrNextRound(room);
       }
-    }, 16000);
+    }, timeoutDuration);
 
   } catch (err) {
     console.error("라운드 빌드 예외 핸들링:", err);
@@ -464,6 +466,7 @@ function checkEndOrNextRound(room) {
   }
 }
 
+// 🚨 [핵심 버그 수정 3] 무승부 판정 로직 완벽 도입 (동점자나 0점 우승 불가)
 function endGame(room) {
   try {
     if (room.roundTimer) clearTimeout(room.roundTimer);
@@ -477,12 +480,24 @@ function endGame(room) {
       .map(p => ({ ...p }))
       .sort((a, b) => b.score - a.score);
 
+    let actualWinner = null;
+    if (finalScores.length > 0) {
+      const topScore = finalScores[0].score;
+      if (topScore > 0) {
+        // 동점자 체크
+        const topScorers = finalScores.filter(p => p.score === topScore);
+        if (topScorers.length === 1) {
+          actualWinner = topScorers[0];
+        }
+      }
+    }
+
     room.status = 'WAITING';
     room.currentRound = 0;
     room.players.forEach(p => { p.score = 0; p.isReady = false; });
 
     io.to(room.code).emit('game_over', {
-      winner: finalScores[0],
+      winner: actualWinner, // 우승자가 없거나 동점이면 null을 뱉음 (무승부)
       finalScores: finalScores,
       roomCode: room.code
     });
