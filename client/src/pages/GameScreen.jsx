@@ -81,12 +81,13 @@ export default function GameScreen() {
   const playerHostIdRef = useRef(`Youtubeer-${Math.random().toString(36).slice(2)}`)
   const roundTokenRef = useRef(0)
 
-  const failSafeTimerRef = useRef(null)
+  // 🚨 말썽을 일으키던 failSafeTimerRef를 영원히 삭제했습니다! 
   const audioStopTimerRef = useRef(null)
   const tickIntervalRef = useRef(null)
   const utteranceRef = useRef(null) 
   const stateChangeHandlerRef = useRef()
 
+  // 💡 프리미엄 한국어 음성 렌더링 유지
   const getBestKoreanVoice = useCallback(() => {
     const voices = window.speechSynthesis.getVoices();
     const koreanVoices = voices.filter(v => v.lang.includes('ko'));
@@ -134,14 +135,15 @@ export default function GameScreen() {
             if (isUnlockingRef.current) return; 
             clearTickTimers();
             setIsPlaying(false);
-            emit('skip_round');
+            // 에러가 나도 클라이언트가 멋대로 넘기지 않게 스킵 신호 발송 제거 (서버가 알아서 25초 대기 후 넘김)
+            setPlaybackError(true);
           }
         }
       });
     });
     window.speechSynthesis.onvoiceschanged = getBestKoreanVoice;
     return () => { cancelled = true; playerRef.current?.destroy?.(); }
-  }, [emit, clearTickTimers, getBestKoreanVoice]);
+  }, [clearTickTimers, getBestKoreanVoice]);
 
   const handleUnlock = () => {
     setSoundUnlocked(true);
@@ -151,19 +153,19 @@ export default function GameScreen() {
     if (AudioContext) {
       try {
         const ctx = new AudioContext();
-        // 💡 소리가 먹히지 않도록 약간의 시간 오프셋(0.05)과 볼륨(0.2)을 증가시킨 파티 아르페지오
+        // 💡 아이폰에서 소리가 안 들리던 현상 수정 (볼륨 UP & 0.05초 여유 부여)
         const t = ctx.currentTime + 0.05; 
         const playNote = (freq, offset) => {
           const osc = ctx.createOscillator(); 
           const gain = ctx.createGain();
           osc.type = 'sine'; 
           osc.frequency.value = freq;
-          gain.gain.setValueAtTime(0.2, t + offset); 
-          gain.gain.exponentialRampToValueAtTime(0.01, t + offset + 0.1);
+          gain.gain.setValueAtTime(0.3, t + offset); 
+          gain.gain.exponentialRampToValueAtTime(0.01, t + offset + 0.15);
           osc.connect(gain); 
           gain.connect(ctx.destination);
           osc.start(t + offset); 
-          osc.stop(t + offset + 0.15);
+          osc.stop(t + offset + 0.2);
         };
         playNote(523.25, 0);   
         playNote(659.25, 0.1); 
@@ -182,7 +184,6 @@ export default function GameScreen() {
     }
 
     if (event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
-      clearTimeout(failSafeTimerRef.current);
       setIsPlaying(true);
       setTimerActive(true);
       setPlaybackBlocked(false);
@@ -195,7 +196,7 @@ export default function GameScreen() {
       }
 
       clearTimeout(audioStopTimerRef.current);
-      // 기존에 잘 작동하던 10초 뒤 정지 + 5초간 틱틱 사운드 로직 유지
+      // 💡 정확히 10초간 음악 재생 후 멈춤 -> 틱틱 소리 5번 작동 로직 (절대 스킵 아님!)
       audioStopTimerRef.current = setTimeout(() => {
         try { playerRef.current?.pauseVideo?.(); } catch (e) {}
         setIsPlaying(false);
@@ -239,14 +240,6 @@ export default function GameScreen() {
 
     const executeVideoPlay = () => {
       if (roundTokenRef.current !== roundToken) return;
-      
-      // 10초 대기 후 재생 실패 시 스킵 (기존 유지)
-      failSafeTimerRef.current = setTimeout(() => {
-        if (roundTokenRef.current === roundToken) {
-          setIsPlaying(false); setTimerActive(false); emit('skip_round');
-        }
-      }, 10000); 
-
       if (playerRef.current?.loadVideoById) {
         playerRef.current.loadVideoById({ videoId: youtubeId, startSeconds, endSeconds });
         setTimeout(() => {
@@ -267,7 +260,7 @@ export default function GameScreen() {
         
         let isExecuted = false;
 
-        // 💡 TTS 멘트가 정상적으로 완전히 종료되었을 때 (1초 대기 후 음악)
+        // 💡 주제 멘트 완료(onend) 후 정확히 1초 대기 후 노래 시작
         utteranceRef.current.onend = () => {
           if (!isExecuted && roundTokenRef.current === roundToken) {
             isExecuted = true;
@@ -275,13 +268,13 @@ export default function GameScreen() {
           }
         };
 
-        // 🚨 무적 방어막: 브라우저가 onend 신호를 먹어버려도 3.5초 뒤 무조건 강제 실행
+        // iOS 브라우저 묵음 버그 방어막: 4초 뒤 무조건 강제 실행
         setTimeout(() => {
           if (!isExecuted && roundTokenRef.current === roundToken) {
             isExecuted = true;
             executeVideoPlay();
           }
-        }, 3500);
+        }, 4000);
 
         window.speechSynthesis.speak(utteranceRef.current);
       } else {
@@ -301,7 +294,7 @@ export default function GameScreen() {
       
       let isExecuted = false;
 
-      // 💡 1라운드 오프닝 멘트가 정상적으로 끝났을 때 (2초 대기 후 주제 안내)
+      // 💡 오프닝 멘트 완료(onend) 후 정확히 2초 대기 후 주제 안내
       utteranceRef.current.onend = () => {
         if (!isExecuted && roundTokenRef.current === roundToken) {
           isExecuted = true;
@@ -309,13 +302,13 @@ export default function GameScreen() {
         }
       };
 
-      // 🚨 무적 방어막: 긴 멘트 중단 시 15초 뒤 무조건 강제 실행
+      // 긴 멘트 방어막: 18초 뒤 강제 실행
       setTimeout(() => {
         if (!isExecuted && roundTokenRef.current === roundToken) {
           isExecuted = true;
           playTopicAndVideo();
         }
-      }, 15000);
+      }, 18000);
 
       setPhaseLabel('🎙️ 오프닝 안내 방송 중...');
       window.speechSynthesis.speak(utteranceRef.current);
@@ -331,7 +324,7 @@ export default function GameScreen() {
 
   useEffect(() => {
     if (!roundActive) {
-      setTimerActive(false); clearTimeout(failSafeTimerRef.current); clearTimeout(audioStopTimerRef.current); clearTickTimers();
+      setTimerActive(false); clearTimeout(audioStopTimerRef.current); clearTickTimers();
     }
   }, [roundActive, clearTickTimers])
 
