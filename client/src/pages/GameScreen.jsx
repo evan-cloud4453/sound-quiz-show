@@ -1,3 +1,9 @@
+// client/src/pages/GameScreen.jsx — 타이머 완전 수정 버전
+// 핵심 변경:
+//   1. YouTube PLAYING 이벤트 → 서버에 'music_started' emit
+//   2. 서버 'timer_start' 수신 시 그때부터 타이머 카운트다운 시작
+//   3. 클라이언트 타이머는 UI 표시용, 실제 심판은 서버
+
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGame } from '../utils/GameContext'
 import { useSocket } from '../hooks/useSocket'
@@ -7,47 +13,45 @@ import './GameScreen.css'
 
 // ─── 상수 ────────────────────────────────────────────────────
 const YT_STATE = { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 }
-const AVATARS = ['🚀','⭐','🌙','💫','🪐','☄️','🌟','🎵','👾','🛸','🌌','🔭']
+const AVATARS  = ['🚀','⭐','🌙','💫','🪐','☄️','🌟','🎵','👾','🛸','🌌','🔭']
 
-// ─── 유틸 ────────────────────────────────────────────────────
 function getAvatar(id) {
   return AVATARS[(id?.charCodeAt(id.length - 1) || 0) % AVATARS.length]
 }
 
-// YouTube IFrame API 로드 (싱글톤)
+// ─── YouTube API 싱글톤 로드 ──────────────────────────────────
 let ytApiPromise = null
 function loadYouTubeApi() {
   if (window.YT?.Player) return Promise.resolve(window.YT)
-  if (ytApiPromise) return ytApiPromise
+  if (ytApiPromise)       return ytApiPromise
   ytApiPromise = new Promise((resolve, reject) => {
     window.onYouTubeIframeAPIReady = () => resolve(window.YT)
     const s = document.createElement('script')
-    s.src = 'https://www.youtube.com/iframe_api'
+    s.src     = 'https://www.youtube.com/iframe_api'
     s.onerror = () => reject(new Error('YouTube API 로드 실패'))
     document.head.appendChild(s)
   })
   return ytApiPromise
 }
 
-// 팡파레 효과음 (Web Audio API)
+// ─── 팡파레 (Web Audio API) ───────────────────────────────────
 function playFanfare(ctx) {
-  // 빠라빠람 빠라바람 빰빰 — 도미솔도 미솔도미 솔솔
   const notes = [
-    [523.25, 0.00, 0.18], // 도
-    [659.25, 0.18, 0.18], // 미
-    [783.99, 0.36, 0.18], // 솔
-    [1046.50,0.54, 0.28], // 도(高)
-    [659.25, 0.88, 0.18], // 미
-    [783.99, 1.06, 0.18], // 솔
-    [1046.50,1.24, 0.18], // 도(高)
-    [659.25, 1.42, 0.18], // 미
-    [783.99, 1.66, 0.28], // 솔 (강)
-    [783.99, 2.00, 0.28], // 솔 (강)
+    [523.25, 0.00, 0.18],
+    [659.25, 0.18, 0.18],
+    [783.99, 0.36, 0.18],
+    [1046.50,0.54, 0.28],
+    [659.25, 0.88, 0.18],
+    [783.99, 1.06, 0.18],
+    [1046.50,1.24, 0.18],
+    [659.25, 1.42, 0.18],
+    [783.99, 1.66, 0.28],
+    [783.99, 2.00, 0.28],
   ]
   notes.forEach(([freq, offset, dur]) => {
-    const osc = ctx.createOscillator()
+    const osc  = ctx.createOscillator()
     const gain = ctx.createGain()
-    osc.type = 'triangle'
+    osc.type          = 'triangle'
     osc.frequency.value = freq
     const t = ctx.currentTime + offset
     gain.gain.setValueAtTime(0, t)
@@ -58,15 +62,14 @@ function playFanfare(ctx) {
     osc.start(t)
     osc.stop(t + dur + 0.05)
   })
-  // 팡파레 총 길이: ~2.3초
-  return 2350
+  return 2350 // ms
 }
 
-// 틱 소리 1회
+// ─── 틱 소리 ─────────────────────────────────────────────────
 function playTick(ctx) {
-  const osc = ctx.createOscillator()
+  const osc  = ctx.createOscillator()
   const gain = ctx.createGain()
-  osc.type = 'sine'
+  osc.type          = 'sine'
   osc.frequency.value = 850
   gain.gain.setValueAtTime(0.15, ctx.currentTime)
   gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
@@ -76,20 +79,18 @@ function playTick(ctx) {
   osc.stop(ctx.currentTime + 0.06)
 }
 
-// 한국어 TTS — Promise 반환, onend 실제 완료 기준
+// ─── TTS — 실제 onend 기다리는 Promise ───────────────────────
 function speak(text, voice, rate = 1.0) {
   return new Promise((resolve) => {
     window.speechSynthesis.cancel()
-    const utt = new SpeechSynthesisUtterance(text)
-    utt.lang = 'ko-KR'
-    utt.voice = voice
-    utt.rate = rate
-    utt.onend = () => resolve()
-    utt.onerror = () => resolve() // 에러도 그냥 진행
+    const utt   = new SpeechSynthesisUtterance(text)
+    utt.lang    = 'ko-KR'
+    utt.voice   = voice
+    utt.rate    = rate
+    utt.onend   = () => resolve()
+    utt.onerror = () => resolve()
     window.speechSynthesis.speak(utt)
-
-    // iOS Safari: onend가 발화 안 되는 경우 방어
-    // 글자당 약 100ms + 여유 3초
+    // iOS onend 묵음 방어: 글자당 100ms + 3초 여유
     const maxMs = Math.max(text.length * 100 + 3000, 5000)
     setTimeout(resolve, maxMs)
   })
@@ -102,47 +103,47 @@ function delay(ms) {
 // ─── 메인 컴포넌트 ────────────────────────────────────────────
 export default function GameScreen() {
   const { state, submitAnswer } = useGame()
-  const { emit } = useSocket()
+  const { emit, on }            = useSocket()
+
   const {
     players, myId, nickname,
-    currentRound, totalRounds, category, hint,
+    currentRound, totalRounds,
+    category, hint,
     youtubeId, youtubeStart, youtubeEnd,
     roundActive, lastResult, targetScore,
+    timeLimit: serverTimeLimit
   } = state
 
   // ── UI 상태 ──────────────────────────────────────────────
-  const [soundUnlocked, setSoundUnlocked] = useState(false)
-  const [isPlaying, setIsPlaying]         = useState(false)
-  const [timerActive, setTimerActive]     = useState(false)
-  const [mediaReady, setMediaReady]       = useState(false)
-  const [answer, setAnswer]               = useState('')
-  const [submitted, setSubmitted]         = useState(false)
-  const [flashWrong, setFlashWrong]       = useState(false)
-  const [phaseLabel, setPhaseLabel]       = useState('접속 대기 중...')
-  const [showResult, setShowResult]       = useState(false)
-  const [playbackError, setPlaybackError] = useState(false)
+  const [soundUnlocked,  setSoundUnlocked]  = useState(false)
+  const [isPlaying,      setIsPlaying]      = useState(false)
+  const [timerActive,    setTimerActive]    = useState(false)
+  const [timerLimit,     setTimerLimit]     = useState(serverTimeLimit || 25)
+  const [mediaReady,     setMediaReady]     = useState(false)
+  const [answer,         setAnswer]         = useState('')
+  const [submitted,      setSubmitted]      = useState(false)
+  const [flashWrong,     setFlashWrong]     = useState(false)
+  const [phaseLabel,     setPhaseLabel]     = useState('접속 대기 중...')
+  const [showResult,     setShowResult]     = useState(false)
+  const [playbackError,  setPlaybackError]  = useState(false)
 
   // ── Ref ──────────────────────────────────────────────────
-  const inputRef        = useRef(null)
-  const playerRef       = useRef(null)
-  const audioCtxRef     = useRef(null)
-  const korVoiceRef     = useRef(null)
-  const hostElemId      = useRef(`yt-${Math.random().toString(36).slice(2)}`)
+  const inputRef          = useRef(null)
+  const playerRef         = useRef(null)
+  const audioCtxRef       = useRef(null)
+  const korVoiceRef       = useRef(null)
+  const hostElemId        = useRef(`yt-${Math.random().toString(36).slice(2)}`)
+  const seqAbortRef       = useRef(null)   // 시퀀스 AbortController
+  const openingDoneRef    = useRef(false)  // 오프닝 1회 여부
+  const musicEndResolveRef = useRef(null)  // 음악 재생 완료 resolve
+  const tickRef           = useRef(null)   // 틱 interval
+  const musicStartedRef   = useRef(false)  // 이번 라운드 music_started 이미 보냈는지
 
-  // 현재 라운드 시퀀스를 취소하기 위한 AbortController
-  const seqAbortRef     = useRef(null)
-  // 오프닝 한 번만
-  const openingDoneRef  = useRef(false)
-  // 음악 재생 완료 resolve
-  const musicEndResolveRef = useRef(null)
-  // 틱 interval
-  const tickRef         = useRef(null)
-
-  // ── AudioContext 초기화 (unlock 시) ─────────────────────
+  // ── AudioContext ─────────────────────────────────────────
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current) {
-      const Ctx = window.AudioContext || window.webkitAudioContext
-      if (Ctx) audioCtxRef.current = new Ctx()
+      const Ctor = window.AudioContext || window.webkitAudioContext
+      if (Ctor) audioCtxRef.current = new Ctor()
     }
     return audioCtxRef.current
   }, [])
@@ -151,11 +152,10 @@ export default function GameScreen() {
   useEffect(() => {
     const init = () => {
       const voices = window.speechSynthesis.getVoices()
-      const ko = voices.filter(v => v.lang.startsWith('ko'))
+      const ko     = voices.filter(v => v.lang.startsWith('ko'))
       korVoiceRef.current = (
         ko.find(v => /natural|premium|google|siri|yuna/i.test(v.name))
-        || ko[0]
-        || null
+        || ko[0] || null
       )
     }
     init()
@@ -172,54 +172,65 @@ export default function GameScreen() {
         playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, playsinline: 1, rel: 0 },
         events: {
           onReady: () => setMediaReady(true),
-          onStateChange: handleYTState,
+          onStateChange: (e) => ytStateHandlerRef.current(e),
           onError: () => {
             setIsPlaying(false)
             setPlaybackError(true)
-            // 음악 재생 실패 → 시퀀스 계속 진행
             musicEndResolveRef.current?.()
             musicEndResolveRef.current = null
           }
         }
       })
     })
-    return () => {
-      destroyed = true
-      playerRef.current?.destroy?.()
-    }
+    return () => { destroyed = true; playerRef.current?.destroy?.() }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── YouTube 상태 변경 핸들러 ─────────────────────────────
-  // useRef로 감싸 클로저 문제 방지
-  const handleYTStateRef = useRef()
-  handleYTStateRef.current = (event) => {
+  // ── YouTube 상태 핸들러 (ref로 최신 클로저 유지) ─────────
+  const ytStateHandlerRef = useRef()
+  ytStateHandlerRef.current = (event) => {
     if (event.data === YT_STATE.PLAYING) {
       setIsPlaying(true)
       setPlaybackError(false)
+
+      // ★ 핵심: 음악이 실제로 재생되기 시작한 순간 서버에 알림
+      // 서버는 이 이벤트를 받고 나서 정확히 ROUND_TIME_LIMIT초 타이머 시작
+      if (!musicStartedRef.current) {
+        musicStartedRef.current = true
+        emit('music_started')
+        console.log('[음악 재생 시작] → 서버에 music_started 전송')
+      }
     }
     if (event.data === YT_STATE.PAUSED || event.data === YT_STATE.ENDED) {
       setIsPlaying(false)
     }
     if (event.data === YT_STATE.ENDED) {
-      // 음악 종료 → 시퀀스 resolve
+      // 음악 자연 종료 → playMusic Promise resolve
       musicEndResolveRef.current?.()
       musicEndResolveRef.current = null
     }
   }
-  function handleYTState(event) {
-    handleYTStateRef.current(event)
-  }
+
+  // ── 서버 'timer_start' 수신 → 클라이언트 타이머 동기화 ──
+  // 서버가 실제 타이머 시작 시 브로드캐스트, 이때 클라이언트 UI도 시작
+  useEffect(() => {
+    const unsub = on('timer_start', ({ timeLimit }) => {
+      console.log(`[타이머 시작] 서버 신호 수신 — ${timeLimit}초`)
+      setTimerLimit(timeLimit)
+      setTimerActive(true)
+      setPhaseLabel('⌨️ 정답을 입력하세요!')
+    })
+    return unsub
+  }, [on])
 
   // ── 음악 재생 Promise ────────────────────────────────────
-  // 실제 ENDED 이벤트 또는 최대 재생시간 초과 시 resolve
   function playMusic(videoId, startSec, endSec, signal) {
     return new Promise((resolve) => {
       if (signal?.aborted) { resolve(); return }
 
-      const start = Number(startSec) || 0
-      const end   = Number(endSec) || 0
-      const clipSec = (end > start) ? (end - start) : 10 // 기본 10초
+      const start   = Number(startSec) || 0
+      const end     = Number(endSec)   || 0
+      const clipSec = (end > start) ? (end - start) : 15
 
       musicEndResolveRef.current = resolve
 
@@ -227,45 +238,41 @@ export default function GameScreen() {
         playerRef.current?.loadVideoById({
           videoId,
           startSeconds: start,
-          endSeconds: end > start ? end : undefined
+          endSeconds:   end > start ? end : undefined
         })
-        // 살짝 딜레이 후 play (버퍼링 대기)
         setTimeout(() => {
           if (signal?.aborted) { resolve(); return }
           playerRef.current?.playVideo?.()
         }, 300)
       } catch(e) {
-        resolve()
-        return
+        resolve(); return
       }
 
-      // 안전망: 클립 길이 + 5초 초과 시 강제 종료
-      const safetyMs = (clipSec + 5) * 1000
-      const safetyTimer = setTimeout(() => {
+      // 안전망: 클립 길이 + 8초 초과 시 강제 resolve
+      const safetyMs = (clipSec + 8) * 1000
+      const timer = setTimeout(() => {
         try { playerRef.current?.stopVideo?.() } catch(e) {}
         resolve()
         musicEndResolveRef.current = null
       }, safetyMs)
 
-      // abort 시 즉시 정리
       signal?.addEventListener('abort', () => {
-        clearTimeout(safetyTimer)
+        clearTimeout(timer)
         try { playerRef.current?.stopVideo?.() } catch(e) {}
         resolve()
         musicEndResolveRef.current = null
       })
 
-      // resolve 후 safety timer 정리
-      const origResolve = musicEndResolveRef.current
+      const orig = musicEndResolveRef.current
       musicEndResolveRef.current = () => {
-        clearTimeout(safetyTimer)
-        origResolve()
+        clearTimeout(timer)
+        orig?.()
         musicEndResolveRef.current = null
       }
     })
   }
 
-  // ── 틱 소리 N번 ─────────────────────────────────────────
+  // ── 틱 소리 N회 ─────────────────────────────────────────
   function playTicks(count, intervalMs) {
     return new Promise(resolve => {
       let i = 0
@@ -273,8 +280,7 @@ export default function GameScreen() {
       tickRef.current = setInterval(() => {
         const ctx = getAudioCtx()
         if (ctx) playTick(ctx)
-        i++
-        if (i >= count) {
+        if (++i >= count) {
           clearInterval(tickRef.current)
           resolve()
         }
@@ -287,57 +293,48 @@ export default function GameScreen() {
     const ctx = getAudioCtx()
     if (ctx?.state === 'suspended') ctx.resume()
     setSoundUnlocked(true)
-    setPhaseLabel('🎙️ 오프닝 안내 중...')
     // YouTube unlock
-    if (playerRef.current?.playVideo) {
-      playerRef.current.playVideo()
-      setTimeout(() => playerRef.current?.pauseVideo?.(), 200)
-    }
+    playerRef.current?.playVideo?.()
+    setTimeout(() => playerRef.current?.pauseVideo?.(), 200)
   }, [getAudioCtx])
 
-  // ── 라운드 시퀀스 ────────────────────────────────────────
-  // soundUnlocked && roundActive && youtubeId 변경 시 실행
+  // ── 라운드 시퀀스 ─────────────────────────────────────────
+  // roundActive + soundUnlocked + youtubeId 변경 시 실행
   useEffect(() => {
-    if (!soundUnlocked) return
-    if (!roundActive) return
+    if (!soundUnlocked || !roundActive) return
 
     // 이전 시퀀스 취소
     seqAbortRef.current?.abort()
-    const ac = new AbortController()
+    const ac  = new AbortController()
     seqAbortRef.current = ac
     const sig = ac.signal
 
-    // 입력 초기화
-    setAnswer('')
-    setSubmitted(false)
-    setFlashWrong(false)
-    setIsPlaying(false)
-    setTimerActive(false)
-    setShowResult(false)
+    // 상태 초기화
+    setAnswer('');      setSubmitted(false); setFlashWrong(false)
+    setIsPlaying(false); setTimerActive(false); setShowResult(false)
     setPlaybackError(false)
+    musicStartedRef.current = false // ← 라운드마다 초기화!
 
     async function runSequence() {
-      // ── 오프닝 (첫 라운드 1회만) ──────────────────────
+      // ── 1라운드 오프닝 (1회만) ────────────────────────
       if (!openingDoneRef.current) {
         openingDoneRef.current = true
         setPhaseLabel('🎙️ 오프닝 안내 방송 중...')
 
-        // 팡파레
         const ctx = getAudioCtx()
         if (ctx) {
           if (ctx.state === 'suspended') await ctx.resume()
           playFanfare(ctx)
-          await delay(2400) // 팡파레 길이
+          await delay(2400)
         }
-
         if (sig.aborted) return
 
-        // 오프닝 멘트
         await speak(
-          `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. ` +
+          `여러분 안녕하세요. ` +
+          `소리를 듣고 정답을 최대한 빨리 맞춰주세요. ` +
           `답이 무엇인지 알 것 같다면 정답을 입력해주세요. ` +
           `입력한 답이 맞다면 1점을 얻습니다. ` +
-          `10라운드 내에 가장 먼저 ${targetScore}점을 달성한 사람이 승리합니다. ` +
+          `${targetScore}점을 먼저 달성한 사람이 승리합니다. ` +
           `자, 이제 시작해볼까요?`,
           korVoiceRef.current
         )
@@ -358,21 +355,21 @@ export default function GameScreen() {
 
       // ── 음악 재생 ─────────────────────────────────────
       if (!youtubeId) {
-        // 음원 없으면 서버에 알림
         emit('skip_round')
         return
       }
 
       setPhaseLabel('🎧 소리를 들어보세요!')
-      setTimerActive(true)
 
+      // playMusic은 YouTube ENDED 이벤트 기준으로 resolve
+      // 서버 타이머는 PLAYING 이벤트(music_started emit) 기준으로 시작
       await playMusic(youtubeId, youtubeStart, youtubeEnd, sig)
       if (sig.aborted) return
 
       setIsPlaying(false)
-      setPhaseLabel('⌨️ 정답을 입력하세요!')
 
-      // 음악 끝난 후 틱 5번 (1초 간격)
+      // 음악 끝난 후 틱 5회 (힌트: 아직 시간 남았음을 알림)
+      setPhaseLabel('⌨️ 정답을 입력하세요!')
       await playTicks(5, 1000)
     }
 
@@ -398,7 +395,7 @@ export default function GameScreen() {
     }
   }, [roundActive])
 
-  // ── 결과 표시 ────────────────────────────────────────────
+  // ── 결과 수신 처리 ───────────────────────────────────────
   useEffect(() => {
     if (!lastResult) return
     const isRound = lastResult.correct || lastResult.noWinner || lastResult.winnerId
@@ -416,11 +413,10 @@ export default function GameScreen() {
     return () => clearTimeout(t)
   }, [lastResult])
 
-  // ── 오답 처리 ────────────────────────────────────────────
+  // ── 개인 오답 처리 ───────────────────────────────────────
   useEffect(() => {
     if (!lastResult) return
     if (lastResult.correct || lastResult.noWinner || lastResult.winnerId) return
-    // 개인 오답
     setSubmitted(false)
     setAnswer('')
     setFlashWrong(true)
@@ -429,7 +425,7 @@ export default function GameScreen() {
     return () => clearTimeout(t)
   }, [lastResult])
 
-  // ── 입력 포커스 ──────────────────────────────────────────
+  // ── 포커스 ───────────────────────────────────────────────
   useEffect(() => {
     if (roundActive && soundUnlocked) {
       setTimeout(() => inputRef.current?.focus(), 300)
@@ -447,28 +443,24 @@ export default function GameScreen() {
 
   // ── 렌더 ─────────────────────────────────────────────────
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score)
-  const progressPct = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
+  const progressPct   = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
 
-      {/* YouTube 플레이어 (숨김) */}
-      <div style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0, pointerEvents: 'none' }}>
+      {/* YouTube 숨김 */}
+      <div style={{ position:'absolute', width:1, height:1, overflow:'hidden', opacity:0, pointerEvents:'none' }}>
         <div id={hostElemId.current} />
       </div>
 
       {/* 언락 오버레이 */}
       {!soundUnlocked && (
-        <div
-          onClick={handleUnlock}
-          style={{
-            position:'fixed', inset:0, zIndex:99999,
-            background:'rgba(4,5,15,0.96)', backdropFilter:'blur(16px)',
-            display:'flex', flexDirection:'column',
-            alignItems:'center', justifyContent:'center',
-            cursor:'pointer', gap:'20px'
-          }}
-        >
+        <div onClick={handleUnlock} style={{
+          position:'fixed', inset:0, zIndex:99999,
+          background:'rgba(4,5,15,0.96)', backdropFilter:'blur(16px)',
+          display:'flex', flexDirection:'column', alignItems:'center',
+          justifyContent:'center', cursor:'pointer', gap:'20px'
+        }}>
           <div style={{ fontSize:'5rem', animation:'float 1.5s ease-in-out infinite' }}>🎵</div>
           <h2 style={{ fontSize:'1.8rem', color:'#06b6d4', textShadow:'0 0 15px rgba(6,182,212,0.6)', textAlign:'center', padding:'0 24px', wordBreak:'keep-all' }}>
             화면을 터치해서 게임을 시작하세요
@@ -479,7 +471,7 @@ export default function GameScreen() {
         </div>
       )}
 
-      {/* 라운드 결과 오버레이 */}
+      {/* 결과 오버레이 */}
       {showResult && lastResult && (
         <div className="result-overlay show">
           {lastResult.winnerId && (
@@ -511,7 +503,7 @@ export default function GameScreen() {
           <div className="scoreboard-title">🏆 스코어보드</div>
           <div className="score-list">
             {sortedPlayers.map((p, i) => {
-              const isMe = p.id === myId || p.nickname === nickname
+              const isMe     = p.id === myId || p.nickname === nickname
               const isWinner = lastResult?.winnerId === p.id
               return (
                 <div key={p.id} className={`score-row ${isMe ? 'me' : ''} ${isWinner ? 'just-won' : ''}`}>
@@ -532,20 +524,18 @@ export default function GameScreen() {
           </div>
         </div>
 
-        {/* 메인 게임 영역 */}
+        {/* 중앙 게임 영역 */}
         <div className="game-center">
-          {/* 진행 바 */}
           <div className="round-progress">
             <div className="round-info">
               <span className="glow-cyan">라운드 {currentRound || 1}</span>
-              <span style={{color:'var(--text-secondary)'}}> / {totalRounds}</span>
+              <span style={{ color:'var(--text-secondary)' }}> / {totalRounds}</span>
             </div>
             <div className="progress-track">
               <div className="progress-fill" style={{ width: `${progressPct}%` }} />
             </div>
           </div>
 
-          {/* 카테고리 */}
           {category && (
             <div className="category-row animate-fadeIn">
               <div className="category-badge">🎵 {category}</div>
@@ -553,17 +543,17 @@ export default function GameScreen() {
             </div>
           )}
 
-          {/* 오디오 비주얼라이저 */}
           <div className="audio-area glass-panel">
             <div className="audio-inner">
-              {mediaReady ? (
-                <WaveformVisualizer isPlaying={isPlaying} />
-              ) : (
-                <div className="audio-loading">
-                  <div className="loading-spinner" />
-                  <span>오디오 시스템 초기화 중...</span>
-                </div>
-              )}
+              {mediaReady
+                ? <WaveformVisualizer isPlaying={isPlaying} />
+                : (
+                  <div className="audio-loading">
+                    <div className="loading-spinner" />
+                    <span>오디오 시스템 초기화 중...</span>
+                  </div>
+                )
+              }
               {playbackError && (
                 <div style={{ color:'#f87171', fontSize:'0.8rem', marginTop:'8px' }}>
                   ⚠️ 영상을 불러올 수 없습니다. 다음 라운드를 기다려주세요.
@@ -573,7 +563,6 @@ export default function GameScreen() {
             </div>
           </div>
 
-          {/* 정답 입력 */}
           <div className={`answer-area glass-panel ${roundActive ? 'active' : ''}`}>
             {roundActive ? (
               <>
@@ -615,8 +604,8 @@ export default function GameScreen() {
         <div className="timer-panel glass-panel">
           <div className="timer-label">남은 시간</div>
           <TimerRing
-            timeLimit={state.timeLimit || 25}
-            active={timerActive}
+            timeLimit={timerLimit}
+            active={timerActive}   // ← 서버 timer_start 수신 시 true
           />
           <div className="timer-hint">빠를수록 유리!</div>
         </div>
