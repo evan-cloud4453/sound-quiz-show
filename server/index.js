@@ -466,7 +466,6 @@ function checkEndOrNextRound(room) {
   }
 }
 
-// 🚨 [핵심 버그 수정 3] 무승부 판정 로직 완벽 도입 (동점자나 0점 우승 불가)
 function endGame(room) {
   try {
     if (room.roundTimer) clearTimeout(room.roundTimer);
@@ -490,8 +489,6 @@ function endGame(room) {
         }
       }
     }
-  }
-}
 
     room.status = 'WAITING';
     room.currentRound = 0;
