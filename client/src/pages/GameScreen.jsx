@@ -136,25 +136,78 @@ export default function GameScreen() {
     setSoundUnlocked(true);
     isUnlockingRef.current = true;
 
-    try {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (AudioContext) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) {
+      try {
         const ctx = new AudioContext();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.frequency.value = 1;
-        gain.gain.value = 0.01;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(0);
-        osc.stop(0.1);
-      }
-    } catch(e) {}
+        
+        // 1. 애플 권한 해제용 묵음 출력
+        const unlockOsc = ctx.createOscillator();
+        const unlockGain = ctx.createGain();
+        unlockOsc.frequency.value = 1;
+        unlockGain.gain.value = 0.01;
+        unlockOsc.connect(unlockGain);
+        unlockGain.connect(ctx.destination);
+        unlockOsc.start(0);
+        unlockOsc.stop(0.1);
+
+        // 🎤 2. 오프닝 연출: 게임 대기 중(currentRound === 0)일 때만 팡파르 및 육성 안내 출력
+        if (currentRound === 0) {
+          const t = ctx.currentTime;
+          const playNote = (freq, startOffset, dur) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.15, t + startOffset);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + startOffset + dur);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(t + startOffset);
+            osc.stop(t + startOffset + dur);
+          };
+
+          // 빠라빠람~
+          playNote(392.00, 0, 0.15);    // G4
+          playNote(392.00, 0.15, 0.15); // G4
+          playNote(392.00, 0.3, 0.15);  // G4
+          playNote(523.25, 0.45, 0.4);  // C5
+          // 빠라바람~
+          playNote(349.23, 0.9, 0.15);  // F4
+          playNote(349.23, 1.05, 0.15); // F4
+          playNote(349.23, 1.2, 0.15);  // F4
+          playNote(466.16, 1.35, 0.4);  // Bb4
+          // 빰빰!
+          playNote(523.25, 1.8, 0.2);   // C5
+          playNote(523.25, 2.1, 0.4);   // C5
+
+          // 안내 멘트 육성 재생 (팡파르 끝난 직후 2.5초 뒤 시작)
+          setTimeout(() => {
+            window.speechSynthesis.cancel();
+            const msg = new SpeechSynthesisUtterance(
+              `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면, 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. 10 라운드 내에 가장 먼저 ${targetScore}점을 달성한 사람이 승리합니다. 자, 이제 시작해볼까요?`
+            );
+            msg.lang = 'ko-KR';
+            msg.rate = 1.1; // 약간 경쾌한 속도
+            window.speechSynthesis.speak(msg);
+          }, 2500);
+
+          setPhaseLabel('🎙️ 안내 방송 진행 중...');
+        }
+      } catch(e) {}
+    }
 
     if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
       playerRef.current.playVideo();
     }
   };
+
+  // 라운드가 시작되면 혹시라도 멘트가 겹치지 않게 강제로 육성을 꺼버림
+  useEffect(() => {
+    if (currentRound > 0) {
+      window.speechSynthesis.cancel();
+    }
+  }, [currentRound]);
 
   stateChangeHandlerRef.current = (event) => {
     if (isUnlockingRef.current && event.data === YOUTUBE_PLAYER_STATE.PLAYING) {
@@ -220,12 +273,11 @@ export default function GameScreen() {
       return;
     }
 
-    // 🚨 [핵심 2] 클라이언트 3.5초 자비 없는 단두대 타이머 장착!
     failSafeTimerRef.current = setTimeout(() => {
       setIsPlaying(false);
       setTimerActive(false);
       emit('skip_round');
-    }, 3500); // 10초 대기를 3.5초로 팍 줄여버림
+    }, 3500);
 
     const startSeconds = Number(youtubeStart) || 0;
     const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
@@ -368,7 +420,7 @@ export default function GameScreen() {
         <div className="game-center">
           <div className="round-progress">
             <div className="round-info">
-              <span className="glow-cyan">라운드 {currentRound}</span>
+              <span className="glow-cyan">라운드 {currentRound === 0 ? 1 : currentRound}</span>
               <span className="text-secondary"> / {totalRounds}</span>
             </div>
             <div className="progress-track">
@@ -391,7 +443,7 @@ export default function GameScreen() {
 
               <div className="youtube-sound-panel">
                 {mediaLoaded ? (
-                  <WaveformVisualizer isPlaying={isPlaying} />
+                  <WaveformVisualizer isPlaying={isPlaying || (currentRound === 0 && soundUnlocked)} />
                 ) : (
                   <div className="audio-loading">
                     <div className="loading-spinner" />
@@ -438,7 +490,7 @@ export default function GameScreen() {
                 )}
               </>
             ) : (
-              <p className="waiting-next">⏳ 다음 라운드 준비 중...</p>
+              <p className="waiting-next">⏳ {currentRound === 0 ? '오프닝 안내 방송 중...' : '다음 라운드 준비 중...'}</p>
             )}
           </div>
         </div>
