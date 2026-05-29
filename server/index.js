@@ -164,6 +164,7 @@ function startRoundTimer(room) {
 
   // 클라이언트 UI 타이머 동기화
   io.to(room.code).emit('timer_start', { timeLimit: ROUND_TIME_LIMIT });
+  io.to(room.code).emit('room_update', getRoomState(room));
   console.log(`[타이머 시작] 방 ${room.code} 라운드 ${room.currentRound} — ${ROUND_TIME_LIMIT}초`);
 }
 
