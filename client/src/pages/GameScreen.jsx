@@ -1,5 +1,3 @@
-// client/src/pages/GameScreen.jsx
-
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGame } from '../utils/GameContext'
 import { useSocket } from '../hooks/useSocket'
@@ -13,6 +11,9 @@ const AVATARS  = ['🚀','⭐','🌙','💫','🪐','☄️','🌟','🎵','👾
 function getAvatar(id) {
   return AVATARS[(id?.charCodeAt(id.length - 1) || 0) % AVATARS.length]
 }
+
+// 브라우저 가비지 컬렉터(GC)에 의해 TTS가 끊기는 버그 방지용 글로벌 배열
+window.utterances = window.utterances || [];
 
 // ─── YouTube API 싱글톤 ───────────────────────────────────────
 let ytApiPromise = null
@@ -29,35 +30,33 @@ function loadYouTubeApi() {
   return ytApiPromise
 }
 
-// ─── 팡파레 ──────────────────────────────────────────────────
+// ─── 파티 입장음 (실로폰 아르페지오) ───────────────────────────
 function playFanfare(ctx) {
-  const notes = [
-    [523.25, 0.00, 0.18], [659.25, 0.18, 0.18],
-    [783.99, 0.36, 0.18], [1046.50,0.54, 0.28],
-    [659.25, 0.88, 0.18], [783.99, 1.06, 0.18],
-    [1046.50,1.24, 0.18], [659.25, 1.42, 0.18],
-    [783.99, 1.66, 0.28], [783.99, 2.00, 0.28],
-  ]
-  notes.forEach(([freq, offset, dur]) => {
-    const osc  = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type            = 'triangle'
-    osc.frequency.value = freq
-    const t = ctx.currentTime + offset
-    gain.gain.setValueAtTime(0, t)
-    gain.gain.linearRampToValueAtTime(0.35, t + 0.02)
-    gain.gain.exponentialRampToValueAtTime(0.01, t + dur)
-    osc.connect(gain); gain.connect(ctx.destination)
-    osc.start(t); osc.stop(t + dur + 0.05)
-  })
-  return 2400 // ms
+  const t = ctx.currentTime;
+  const playNote = (freq, offset) => {
+    const osc = ctx.createOscillator(); 
+    const gain = ctx.createGain();
+    osc.type = 'sine'; 
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.2, t + offset); 
+    gain.gain.exponentialRampToValueAtTime(0.01, t + offset + 0.15);
+    osc.connect(gain); 
+    gain.connect(ctx.destination);
+    osc.start(t + offset); 
+    osc.stop(t + offset + 0.2);
+  };
+  playNote(523.25, 0);   
+  playNote(659.25, 0.1); 
+  playNote(783.99, 0.2); 
+  playNote(1046.50, 0.3); 
+  return 600; // ms
 }
 
 // ─── 틱 소리 ─────────────────────────────────────────────────
 function playTick(ctx) {
   const osc  = ctx.createOscillator()
   const gain = ctx.createGain()
-  osc.type            = 'sine'
+  osc.type             = 'sine'
   osc.frequency.value = 850
   gain.gain.setValueAtTime(0.15, ctx.currentTime)
   gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
@@ -65,33 +64,33 @@ function playTick(ctx) {
   osc.start(); osc.stop(ctx.currentTime + 0.06)
 }
 
-// ─── TTS — onend 실제 완료 대기 ──────────────────────────────
-// ★ audioCtx를 받아서 resume 보장 후 speak
-function speak(text, voice, audioCtx) {
+// ─── 무적 TTS 엔진 ──────────────────────────────
+function speakSafe(text, voice) {
   return new Promise((resolve) => {
-    // iOS: AudioContext가 suspended면 TTS도 묵음 처리되는 경우 있음
-    const doSpeak = () => {
-      window.speechSynthesis.cancel()
-      const utt   = new SpeechSynthesisUtterance(text)
-      utt.lang    = 'ko-KR'
-      utt.voice   = voice || null
-      utt.rate    = 1.0
-      utt.volume  = 1.0
-      utt.onend   = () => resolve()
-      utt.onerror = () => resolve()
-      window.speechSynthesis.speak(utt)
+    window.speechSynthesis.cancel();
+    const utt   = new SpeechSynthesisUtterance(text);
+    utt.lang    = 'ko-KR';
+    if(voice) utt.voice = voice;
+    utt.rate    = 1.1; 
+    
+    // 브라우저가 버리지 못하게 글로벌 락
+    window.utterances.push(utt);
 
-      // iOS onend 묵음 방어: 글자당 120ms + 4초 여유
-      const maxMs = Math.max(text.length * 120 + 4000, 6000)
-      setTimeout(resolve, maxMs)
-    }
+    let resolved = false;
+    const safeResolve = () => {
+      if (resolved) return;
+      resolved = true;
+      resolve();
+    };
 
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume().then(doSpeak).catch(doSpeak)
-    } else {
-      doSpeak()
-    }
-  })
+    utt.onend   = safeResolve;
+    utt.onerror = safeResolve;
+    window.speechSynthesis.speak(utt);
+
+    // 완벽한 타임아웃 보험 (글자당 150ms + 1초 여유)
+    const fallbackTime = Math.max(text.length * 150 + 1000, 2000);
+    setTimeout(safeResolve, fallbackTime);
+  });
 }
 
 function delay(ms) {
@@ -138,7 +137,6 @@ export default function GameScreen() {
   const tickRef            = useRef(null)
   const musicStartedRef    = useRef(false)
 
-  // ── AudioContext 초기화 ───────────────────────────────────
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current) {
       const Ctor = window.AudioContext || window.webkitAudioContext
@@ -147,21 +145,18 @@ export default function GameScreen() {
     return audioCtxRef.current
   }, [])
 
-  // ── 한국어 음성 초기화 ───────────────────────────────────
   useEffect(() => {
-    const init = () => {
+    const initVoice = () => {
       const voices = window.speechSynthesis.getVoices()
       const ko     = voices.filter(v => v.lang.startsWith('ko'))
       korVoiceRef.current = (
-        ko.find(v => /natural|premium|google|siri|yuna/i.test(v.name))
-        || ko[0] || null
+        ko.find(v => /natural|premium|google|siri|yuna/i.test(v.name)) || ko[0] || null
       )
     }
-    init()
-    window.speechSynthesis.onvoiceschanged = init
+    initVoice();
+    window.speechSynthesis.onvoiceschanged = initVoice;
   }, [])
 
-  // ── YouTube Player 초기화 ────────────────────────────────
   useEffect(() => {
     let destroyed = false
     loadYouTubeApi().then(YT => {
@@ -182,20 +177,17 @@ export default function GameScreen() {
       })
     })
     return () => { destroyed = true; playerRef.current?.destroy?.() }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── YouTube 상태 핸들러 ───────────────────────────────────
   const ytStateHandlerRef = useRef()
   ytStateHandlerRef.current = (event) => {
     if (event.data === YT_STATE.PLAYING) {
       setIsPlaying(true)
       setPlaybackError(false)
 
-      // ★ 음악 실제 재생 시작 → 서버에 알림 (1회만)
       if (!musicStartedRef.current) {
         musicStartedRef.current = true
-        emit('music_started')
+        emit('music_started') // 💡 서버로 타이머 가동 신호
       }
     }
     if (event.data === YT_STATE.PAUSED || event.data === YT_STATE.ENDED) {
@@ -207,7 +199,7 @@ export default function GameScreen() {
     }
   }
 
-  // ── 서버 timer_start 수신 → UI 타이머 동기화 ────────────
+  // ── 서버 timer_start 수신 ────────────
   useEffect(() => {
     const unsub = on('timer_start', ({ timeLimit }) => {
       setTimerLimit(timeLimit)
@@ -217,16 +209,14 @@ export default function GameScreen() {
     return unsub
   }, [on])
 
-  // ── 음악 재생 Promise (ENDED 이벤트 기준) ────────────────
   function playMusic(videoId, startSec, endSec, signal) {
     return new Promise((resolve) => {
       if (signal?.aborted) { resolve(); return }
 
       const start   = Number(startSec) || 0
       const end     = Number(endSec)   || 0
-      const clipSec = (end > start) ? (end - start) : 15
+      const clipSec = (end > start) ? (end - start) : 10 // 기본 10초 재생으로 고정
 
-      // resolve wrapper: 중복 호출 방지
       let resolved = false
       const safeResolve = () => {
         if (resolved) return
@@ -251,11 +241,11 @@ export default function GameScreen() {
         safeResolve(); return
       }
 
-      // 안전망: 클립 + 8초
+      // 10초가 지나면 무조건 노래 끊고 리졸브 (틱틱 시작)
       const safetyTimer = setTimeout(() => {
         try { playerRef.current?.stopVideo?.() } catch(e) {}
         safeResolve()
-      }, (clipSec + 8) * 1000)
+      }, clipSec * 1000)
 
       signal?.addEventListener('abort', () => {
         clearTimeout(safetyTimer)
@@ -263,7 +253,6 @@ export default function GameScreen() {
         safeResolve()
       })
 
-      // safetyTimer 정리를 위해 safeResolve 래핑
       const origSafe = safeResolve
       musicEndResolveRef.current = () => {
         clearTimeout(safetyTimer)
@@ -272,51 +261,37 @@ export default function GameScreen() {
     })
   }
 
-  // ── 틱 소리 N회 ─────────────────────────────────────────
-  function playTicks(count, intervalMs, signal) {
+  // ── 남은 시간까지 틱 소리 재생 ──────────────────────────
+  function playTicksTillEnd(signal) {
     return new Promise(resolve => {
-      let i = 0
       clearInterval(tickRef.current)
       tickRef.current = setInterval(() => {
         if (signal?.aborted) {
-          clearInterval(tickRef.current)
-          resolve(); return
+          clearInterval(tickRef.current); resolve(); return;
         }
         const ctx = getAudioCtx()
         if (ctx) playTick(ctx)
-        if (++i >= count) {
-          clearInterval(tickRef.current)
-          resolve()
-        }
-      }, intervalMs)
+      }, 1000)
     })
   }
 
-  // ── 언락 버튼 ────────────────────────────────────────────
   const handleUnlock = useCallback(async () => {
     const ctx = getAudioCtx()
+    if (ctx?.state === 'suspended') await ctx.resume()
 
-    // ★ AudioContext를 반드시 resume (iOS 정책)
-    if (ctx?.state === 'suspended') {
-      await ctx.resume()
-    }
-
-    // ★ speechSynthesis 워밍업 (빈 발화로 iOS 음성 엔진 깨우기)
     const warmup = new SpeechSynthesisUtterance(' ')
     warmup.volume = 0
     warmup.lang   = 'ko-KR'
     window.speechSynthesis.speak(warmup)
 
     setSoundUnlocked(true)
-
-    // YouTube unlock
     if (playerRef.current?.playVideo) {
       playerRef.current.playVideo()
       setTimeout(() => playerRef.current?.pauseVideo?.(), 200)
     }
   }, [getAudioCtx])
 
-  // ── 라운드 시퀀스 ────────────────────────────────────────
+  // ── 완벽히 제어되는 라운드 시퀀스 파이프라인 ────────────────
   useEffect(() => {
     if (!soundUnlocked || !roundActive) return
 
@@ -328,12 +303,12 @@ export default function GameScreen() {
     setAnswer(''); setSubmitted(false); setFlashWrong(false)
     setIsPlaying(false); setTimerActive(false)
     setShowResult(false); setPlaybackError(false)
-    musicStartedRef.current = false // ★ 라운드마다 초기화
+    musicStartedRef.current = false 
 
     async function runSequence() {
       const ctx = getAudioCtx()
 
-      // ── 1라운드 오프닝 (1회만) ──────────────────────
+      // 1. 오프닝 로직
       if (!openingDoneRef.current) {
         openingDoneRef.current = true
         setPhaseLabel('🎙️ 오프닝 안내 방송 중...')
@@ -341,36 +316,28 @@ export default function GameScreen() {
         if (ctx) {
           if (ctx.state === 'suspended') await ctx.resume()
           playFanfare(ctx)
-          await delay(2400)
         }
         if (sig.aborted) return
 
-        await speak(
-          `여러분 안녕하세요. ` +
-          `소리를 듣고 정답을 최대한 빨리 맞춰주세요. ` +
-          `답이 무엇인지 알 것 같다면 정답을 입력해주세요. ` +
-          `입력한 답이 맞다면 1점을 얻습니다. ` +
-          `${targetScore}점을 먼저 달성한 사람이 승리합니다. ` +
-          `자, 이제 시작해볼까요?`,
-          korVoiceRef.current,
-          ctx
+        await speakSafe(
+          `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. ${targetScore}점을 먼저 달성한 사람이 승리합니다. 자, 이제 시작해볼까요?`,
+          korVoiceRef.current
         )
         if (sig.aborted) return
-
-        await delay(2000)
+        await delay(1000) // 멘트 끝나고 1초 대기
         if (sig.aborted) return
       }
 
-      // ── 주제 안내 ───────────────────────────────────
+      // 2. 주제 안내 로직
       if (category) {
         setPhaseLabel(`🎵 주제: ${category}`)
-        await speak(category, korVoiceRef.current, ctx)
+        await speakSafe(category, korVoiceRef.current)
         if (sig.aborted) return
-        await delay(1000)
+        await delay(500) // 주제 안내 후 0.5초 대기
         if (sig.aborted) return
       }
 
-      // ── 음악 재생 ───────────────────────────────────
+      // 3. 유튜브 음악 가동
       if (!youtubeId) {
         emit('skip_round')
         return
@@ -380,11 +347,10 @@ export default function GameScreen() {
       await playMusic(youtubeId, youtubeStart, youtubeEnd, sig)
       if (sig.aborted) return
 
+      // 4. 음악 10초 끝난 직후 틱-틱 사운드 작동
       setIsPlaying(false)
       setPhaseLabel('⌨️ 정답을 입력하세요!')
-
-      // 음악 끝 후 틱 5회
-      await playTicks(5, 1000, sig)
+      await playTicksTillEnd(sig) // 서버 타이머가 끝내줄 때까지 틱틱 소리 반복
     }
 
     runSequence()
@@ -395,10 +361,8 @@ export default function GameScreen() {
       window.speechSynthesis.cancel()
       try { playerRef.current?.stopVideo?.() } catch(e) {}
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [soundUnlocked, roundActive, youtubeId, currentRound])
+  }, [soundUnlocked, roundActive, youtubeId, currentRound, category, targetScore, emit, getAudioCtx])
 
-  // ── 라운드 비활성화 정리 ─────────────────────────────────
   useEffect(() => {
     if (!roundActive) {
       seqAbortRef.current?.abort()
@@ -409,7 +373,6 @@ export default function GameScreen() {
     }
   }, [roundActive])
 
-  // ── 결과 수신 ────────────────────────────────────────────
   useEffect(() => {
     if (!lastResult) return
     const isRound = lastResult.correct || lastResult.noWinner || lastResult.winnerId
@@ -426,7 +389,6 @@ export default function GameScreen() {
     return () => clearTimeout(t)
   }, [lastResult])
 
-  // ── 개인 오답 ────────────────────────────────────────────
   useEffect(() => {
     if (!lastResult) return
     if (lastResult.correct || lastResult.noWinner || lastResult.winnerId) return
@@ -437,13 +399,11 @@ export default function GameScreen() {
     return () => clearTimeout(t)
   }, [lastResult])
 
-  // ── 포커스 ───────────────────────────────────────────────
   useEffect(() => {
     if (roundActive && soundUnlocked)
       setTimeout(() => inputRef.current?.focus(), 300)
   }, [roundActive, soundUnlocked])
 
-  // ── 제출 ─────────────────────────────────────────────────
   const handleSubmit = useCallback(() => {
     if (!answer.trim() || submitted || !roundActive) return
     setSubmitted(true)
@@ -452,19 +412,15 @@ export default function GameScreen() {
 
   const handleKey = (e) => { if (e.key === 'Enter') handleSubmit() }
 
-  // ── 렌더 ─────────────────────────────────────────────────
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score)
   const progressPct   = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
-
-      {/* YouTube 숨김 플레이어 */}
       <div style={{ position:'absolute', width:1, height:1, overflow:'hidden', opacity:0, pointerEvents:'none' }}>
         <div id={hostElemId.current} />
       </div>
 
-      {/* 언락 오버레이 */}
       {!soundUnlocked && (
         <div onClick={handleUnlock} style={{
           position:'fixed', inset:0, zIndex:99999,
@@ -475,8 +431,7 @@ export default function GameScreen() {
         }}>
           <div style={{ fontSize:'5rem', animation:'float 1.5s ease-in-out infinite' }}>🎵</div>
           <h2 style={{
-            fontSize:'1.8rem', color:'#06b6d4',
-            textShadow:'0 0 15px rgba(6,182,212,0.6)',
+            fontSize:'1.8rem', color:'#06b6d4', textShadow:'0 0 15px rgba(6,182,212,0.6)',
             textAlign:'center', padding:'0 24px', wordBreak:'keep-all'
           }}>
             화면을 터치해서 게임을 시작하세요
@@ -487,7 +442,6 @@ export default function GameScreen() {
         </div>
       )}
 
-      {/* 결과 오버레이 */}
       {showResult && lastResult && (
         <div className="result-overlay show">
           {lastResult.winnerId && (
@@ -511,10 +465,7 @@ export default function GameScreen() {
         </div>
       )}
 
-      {/* 게임 레이아웃 */}
       <div className="game-layout">
-
-        {/* 스코어보드 */}
         <div className="scoreboard-panel glass-panel">
           <div className="scoreboard-title">🏆 스코어보드</div>
           <div className="score-list">
@@ -540,7 +491,6 @@ export default function GameScreen() {
           </div>
         </div>
 
-        {/* 메인 */}
         <div className="game-center">
           <div className="round-progress">
             <div className="round-info">
@@ -607,17 +557,17 @@ export default function GameScreen() {
           </div>
         </div>
 
-        {/* 타이머 */}
         <div className="timer-panel glass-panel">
           <div className="timer-label">남은 시간</div>
+          {/* 💡 서버와 상태 동기화를 위해 isTimerRunning을 키에 포함시킴 */}
           <TimerRing
-            key={currentRound}
+            key={`${currentRound}-${isTimerRunning}`}
             timeLimit={timerLimit}
             active={timerActive || isTimerRunning}
           />
           <div className="timer-hint">빠를수록 유리!</div>
         </div>
-        
+
       </div>
     </div>
   )
