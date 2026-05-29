@@ -483,21 +483,22 @@ function endGame(room) {
     let actualWinner = null;
     if (finalScores.length > 0) {
       const topScore = finalScores[0].score;
-      if (topScore > 0) {
-        // 동점자 체크
+      if (topScore > 0) { // 0점 우승 불가
         const topScorers = finalScores.filter(p => p.score === topScore);
         if (topScorers.length === 1) {
-          actualWinner = topScorers[0];
+          actualWinner = topScorers[0]; // 단독 1등만 우승 처리
         }
       }
     }
+  }
+}
 
     room.status = 'WAITING';
     room.currentRound = 0;
     room.players.forEach(p => { p.score = 0; p.isReady = false; });
 
     io.to(room.code).emit('game_over', {
-      winner: actualWinner, // 우승자가 없거나 동점이면 null을 뱉음 (무승부)
+      winner: actualWinner, // 우승자가 없거나 동점이면 null 전송 (무승부)
       finalScores: finalScores,
       roomCode: room.code
     });
