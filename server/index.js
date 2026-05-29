@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
-const https = require('https'); // 💡 유튜브 생존 검사용 네이티브 모듈
+const https = require('https');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
@@ -31,7 +31,6 @@ app.get('/', (_, res) => res.json({ name: 'Sound Quiz Show Server', version: '1.
 const { RAW_QUIZ_DATA } = require('./quizData');
 const rooms = new Map();
 
-// 🚨 [핵심 1] 서버 구동 시 출제 가능 문제 전수 조사 로직
 let VALIDATED_QUIZ_DATA = [];
 
 const QUIZ_DATA = RAW_QUIZ_DATA.map(question => ({
@@ -46,7 +45,6 @@ function checkYouTubeValid(youtubeId) {
   return new Promise((resolve) => {
     const url = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}`;
     https.get(url, (res) => {
-      // 200 OK가 떨어지면 살아있는 영상!
       resolve(res.statusCode === 200);
     }).on('error', () => resolve(false));
   });
@@ -57,7 +55,6 @@ async function preCheckQuestions() {
   const valid = [];
   const baseQuestions = QUIZ_DATA.filter(q => q.youtubeId && q.youtubeId !== '여기에_ID_입력' && q.youtubeId.length >= 10);
   
-  // 병렬로 초고속 검사 진행
   const checks = baseQuestions.map(async (q) => {
     const isAlive = await checkYouTubeValid(q.youtubeId);
     if (isAlive) {
@@ -72,7 +69,6 @@ async function preCheckQuestions() {
   console.log(`✅ [검사 완료] 총 ${VALIDATED_QUIZ_DATA.length}개의 완벽하게 살아있는 문제만 게임에 투입됩니다!`);
 }
 
-// 서버 시작 시 무조건 1회 검사 실행
 preCheckQuestions();
 
 function generateRoomCode() {
@@ -83,7 +79,6 @@ function generateRoomCode() {
 }
 
 function getRandomQuestions(count = 10) {
-  // 💡 깡통 데이터가 아닌 100% 검증된 배열에서만 문제를 뽑습니다.
   const shuffled = [...VALIDATED_QUIZ_DATA].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, Math.min(count, shuffled.length));
 }
@@ -219,7 +214,10 @@ io.on('connection', (socket) => {
       io.to(room.code).emit('game_started', { totalRounds: room.questions.length, targetScore: room.targetScore });
 
       cb?.({ success: true });
-      setTimeout(() => startRound(room), 1500);
+
+      // 🎤 [오프닝 연출 딜레이] 프론트엔드에서 팡파르와 안내 멘트(15초)가 끝날 때까지 16초 대기 후 1라운드 시작!
+      setTimeout(() => startRound(room), 16000);
+
     } catch (e) {
       console.error(e);
       cb?.({ error: '서버 오류가 발생했습니다.' });
@@ -355,6 +353,7 @@ io.on('connection', (socket) => {
             }, 2500);
           }
         } catch (timerError) {
+          console.error("타이머 내부 동작 예외 복구 완료:", timerError);
           setTimeout(() => checkEndOrNextRound(room), 100);
         }
       }, (ROUND_TIME_LIMIT * 1000) + 500);
@@ -426,11 +425,11 @@ function startRound(room) {
 
     io.to(room.code).emit('room_update', getRoomState(room));
 
-    // 최후의 보루 방어막
     room.loadingTimeoutTimer = setTimeout(() => {
       try {
         if (room.status === 'PLAYING' && !room.roundTimer && !room.answeredThisRound) {
           room.answeredThisRound = true;
+          
           io.to(room.code).emit('answer_result', {
             correct: false,
             noWinner: true,
@@ -438,6 +437,7 @@ function startRound(room) {
             message: '시간 초과! (재생 지연)',
             scores: room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
           });
+
           setTimeout(() => checkEndOrNextRound(room), 2500);
         }
       } catch (e) {
