@@ -155,14 +155,24 @@ export default function GameScreen() {
     if (AudioContext) {
       try {
         const ctx = new AudioContext();
-        const unlockOsc = ctx.createOscillator();
-        const unlockGain = ctx.createGain();
-        unlockOsc.frequency.value = 1;
-        unlockGain.gain.value = 0.01;
-        unlockOsc.connect(unlockGain);
-        unlockGain.connect(ctx.destination);
-        unlockOsc.start(0);
-        unlockOsc.stop(0.1);
+        const t = ctx.currentTime;
+        const playNote = (freq, offset) => {
+          const osc = ctx.createOscillator(); 
+          const gain = ctx.createGain();
+          osc.type = 'sine'; 
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.1, t + offset); 
+          gain.gain.exponentialRampToValueAtTime(0.01, t + offset + 0.1);
+          osc.connect(gain); 
+          gain.connect(ctx.destination);
+          osc.start(t + offset); 
+          osc.stop(t + offset + 0.1);
+        };
+        // 파티 입장 느낌의 실로폰 4단음 (도-미-솔-도)
+        playNote(523.25, 0);   
+        playNote(659.25, 0.1); 
+        playNote(783.99, 0.2); 
+        playNote(1046.50, 0.3);
       } catch(e) {}
     }
 
@@ -239,25 +249,50 @@ export default function GameScreen() {
     const endSeconds = getClipEnd(startSeconds, Number(youtubeEnd) || 0);
 
     const executeVideoPlay = () => {
-      if (roundTokenRef.current !== roundToken) return;
-      
-      // 🚨 버퍼링 지연을 대비해 단두대 타이머를 10초로 넉넉하게 연장! (안 끝났는데 튕기는 버그 완벽 차단)
-      failSafeTimerRef.current = setTimeout(() => {
-        if (roundTokenRef.current === roundToken) {
-          setIsPlaying(false);
-          setTimerActive(false);
-          emit('skip_round');
-        }
-      }, 10000); 
-
-      if (playerRef.current?.loadVideoById) {
-        playerRef.current.loadVideoById({ videoId: youtubeId, startSeconds, endSeconds });
-        setTimeout(() => {
+      // 1. 카테고리 주제를 안내하고 1초 뒤 유튜브를 트는 함수
+    const playTopicAndVideo = () => {
+      if (category && roundTokenRef.current === roundToken) {
+        window.speechSynthesis.cancel();
+        const msg = new SpeechSynthesisUtterance(category);
+        msg.lang = 'ko-KR';
+        // msg.voice = getBestKoreanVoice(); // (만약 프리미엄 보이스 함수가 있다면 주석 해제)
+        msg.rate = 1.0; 
+        
+        // 주제 안내 음성이 완전히 끝난(onend) 직후 1초 대기 후 음악 큐!
+        msg.onend = () => {
           if (roundTokenRef.current === roundToken) {
-            try { playerRef.current?.playVideo(); } catch(e){}
+            setTimeout(() => executeVideoPlay(), 1000); 
           }
-        }, 150);
+        };
+        window.speechSynthesis.speak(msg);
+      } else {
+        executeVideoPlay();
       }
+    };
+
+    // 2. 1라운드(오프닝)와 2라운드 이상을 구분하여 실행
+    if (currentRound === 1 && !hasPlayedIntroRef.current) {
+      hasPlayedIntroRef.current = true;
+      window.speechSynthesis.cancel();
+      const msg = new SpeechSynthesisUtterance(
+        `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면, 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. 10 라운드 내에 가장 먼저 ${targetScore}점을 달성한 사람이 승리합니다. 자, 이제 시작해볼까요?`
+      );
+      msg.lang = 'ko-KR';
+      msg.rate = 1.0; 
+      
+      // 오프닝 안내가 완전히 끝난 직후 2초 대기 후 주제 안내로 바통 터치!
+      msg.onend = () => {
+        if (roundTokenRef.current === roundToken) {
+          setTimeout(() => playTopicAndVideo(), 2000); 
+        }
+      };
+
+      setPhaseLabel('🎙️ 오프닝 안내 방송 중...');
+      window.speechSynthesis.speak(msg);
+    } else if (currentRound > 0) {
+      // 2라운드부터는 오프닝 없이 바로 주제 안내부터 실행!
+      playTopicAndVideo();
+    }
     };
 
     // 💡 [주제 안내 및 비디오 큐잉 체인]
