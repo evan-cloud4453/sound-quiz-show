@@ -561,7 +561,7 @@ export default function GameScreen() {
           <div className="timer-label">남은 시간</div>
           {/* 💡 서버와 상태 동기화를 위해 isTimerRunning을 키에 포함시킴 */}
           <TimerRing
-            key={`${currentRound}-${isTimerRunning}`}
+            key={`${currentRound}-${timerActive || isTimerRunning}`}
             timeLimit={timerLimit}
             active={timerActive || isTimerRunning}
           />
