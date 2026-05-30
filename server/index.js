@@ -12,7 +12,7 @@ const server = http.createServer(app);
 
 const CLIENT_URL       = process.env.CLIENT_URL || 'http://localhost:5173';
 const ROUND_COUNT      = 10;
-const ROUND_TIME_LIMIT = 25; // music_started 수신 후 정답 입력 시간 (초)
+const ROUND_TIME_LIMIT = 15; // music_started 수신 후 정답 입력 시간 (초)
 
 const io = new Server(server, {
   cors: {
