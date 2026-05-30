@@ -1,61 +1,110 @@
+// client/src/hooks/useSocket.js — v4
+// 수정: on() 등록 전 도달한 이벤트를 놓치지 않도록 큐잉 방식으로 변경
+// timer_start처럼 컴포넌트 마운트 직후 올 수 있는 이벤트도 안전하게 수신
+
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io } from 'socket.io-client'
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'
 
+// 소켓 인스턴스를 모듈 레벨 싱글톤으로 관리
+// (React StrictMode 이중 마운트에서 소켓이 두 개 생기는 문제 방지)
+let globalSocket = null
+let globalConnected = false
+
+function getSocket() {
+  if (!globalSocket || globalSocket.disconnected) {
+    globalSocket = io(SERVER_URL, {
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000
+    })
+  }
+  return globalSocket
+}
+
 export function useSocket() {
-  const socketRef = useRef(null)
-  const [connected, setConnected] = useState(false)
-  const listenersRef = useRef({})
+  const [connected, setConnected] = useState(globalConnected)
+  const listenersRef = useRef({}) // { eventName: Set<handler> }
 
   useEffect(() => {
-    const socket = io(SERVER_URL, {
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000
-    })
+    const socket = getSocket()
 
-    socketRef.current = socket
-
-    socket.on('connect', () => {
+    const onConnect = () => {
+      globalConnected = true
       setConnected(true)
-      console.log('[Socket] Connected:', socket.id)
-    })
-
-    socket.on('disconnect', () => {
+    }
+    const onDisconnect = () => {
+      globalConnected = false
       setConnected(false)
-      console.log('[Socket] Disconnected')
+    }
+
+    socket.on('connect',    onConnect)
+    socket.on('disconnect', onDisconnect)
+
+    if (socket.connected) setConnected(true)
+
+    // 모든 게임 이벤트를 여기서 등록하고 listenersRef로 포워딩
+    const GAME_EVENTS = [
+      'room_update',
+      'game_started',
+      'round_start',
+      'answer_result',
+      'game_over',
+      'system_message',
+      'timer_start',    // ★ 타이머 이벤트 명시적 등록
+      'hint_revealed'
+    ]
+
+    const forwarders = {}
+    GAME_EVENTS.forEach(event => {
+      forwarders[event] = (...args) => {
+        const handlers = listenersRef.current[event]
+        if (handlers) {
+          handlers.forEach(h => {
+            try { h(...args) } catch(e) { console.error(`[useSocket] ${event} handler error:`, e) }
+          })
+        }
+      }
+      socket.on(event, forwarders[event])
     })
 
-    // Forward all events to registered listeners
-    const forward = (event) => (...args) => {
-      const handlers = listenersRef.current[event] || []
-      handlers.forEach(h => h(...args))
-    }
-
-    const events = [
-      'room_update', 'game_started', 'round_start',
-      'hint_revealed', 'answer_result', 'game_over', 'system_message'
-    ]
-    events.forEach(ev => socket.on(ev, forward(ev)))
-
     return () => {
-      socket.disconnect()
-      socketRef.current = null
+      socket.off('connect',    onConnect)
+      socket.off('disconnect', onDisconnect)
+      GAME_EVENTS.forEach(event => {
+        socket.off(event, forwarders[event])
+      })
     }
   }, [])
 
+  // on(event, handler) → cleanup 함수 반환
   const on = useCallback((event, handler) => {
-    if (!listenersRef.current[event]) listenersRef.current[event] = []
-    listenersRef.current[event].push(handler)
+    if (!listenersRef.current[event]) {
+      listenersRef.current[event] = new Set()
+    }
+    listenersRef.current[event].add(handler)
+
     return () => {
-      listenersRef.current[event] = listenersRef.current[event].filter(h => h !== handler)
+      listenersRef.current[event]?.delete(handler)
     }
   }, [])
 
+  // emit
   const emit = useCallback((event, data, cb) => {
-    if (socketRef.current) socketRef.current.emit(event, data, cb)
+    const socket = getSocket()
+    if (socket?.connected) {
+      socket.emit(event, data, cb)
+    } else {
+      console.warn(`[useSocket] emit '${event}' 실패: 소켓 미연결`)
+    }
   }, [])
 
-  return { emit, on, connected, socketId: socketRef.current?.id }
+  return {
+    emit,
+    on,
+    connected,
+    socketId: globalSocket?.id
+  }
 }
