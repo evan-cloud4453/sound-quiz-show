@@ -1,3 +1,5 @@
+// client/src/pages/GameScreen.jsx
+
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGame } from '../utils/GameContext'
 import { useSocket } from '../hooks/useSocket'
