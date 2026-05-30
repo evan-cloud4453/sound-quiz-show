@@ -1,4 +1,9 @@
-// client/src/pages/GameScreen.jsx
+// client/src/pages/GameScreen.jsx — v4
+// 수정:
+//   1. speakSafe: cancel() 후 150ms 대기 → TTS 묵음 버그 수정
+//   2. timer_start 리스너를 GameContext 없이 직접 소켓에서 수신
+//   3. isTimerRunning 의존 제거, timerActive만 사용
+//   4. window.utterances 누수 방지 (최대 5개 유지)
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGame } from '../utils/GameContext'
@@ -7,92 +12,90 @@ import WaveformVisualizer from '../components/WaveformVisualizer'
 import TimerRing from '../components/TimerRing'
 import './GameScreen.css'
 
-// ─── 상수 ────────────────────────────────────────────────────
 const YT_STATE = { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3 }
 const AVATARS  = ['🚀','⭐','🌙','💫','🪐','☄️','🌟','🎵','👾','🛸','🌌','🔭']
 function getAvatar(id) {
   return AVATARS[(id?.charCodeAt(id.length - 1) || 0) % AVATARS.length]
 }
 
-// 브라우저 가비지 컬렉터(GC)에 의해 TTS가 끊기는 버그 방지용 글로벌 배열
-window.utterances = window.utterances || [];
-
 // ─── YouTube API 싱글톤 ───────────────────────────────────────
 let ytApiPromise = null
 function loadYouTubeApi() {
   if (window.YT?.Player) return Promise.resolve(window.YT)
-  if (ytApiPromise)       return ytApiPromise
+  if (ytApiPromise) return ytApiPromise
   ytApiPromise = new Promise((resolve, reject) => {
     window.onYouTubeIframeAPIReady = () => resolve(window.YT)
     const s = document.createElement('script')
-    s.src     = 'https://www.youtube.com/iframe_api'
+    s.src = 'https://www.youtube.com/iframe_api'
     s.onerror = () => reject(new Error('YouTube API 로드 실패'))
     document.head.appendChild(s)
   })
   return ytApiPromise
 }
 
-// ─── 파티 입장음 (실로폰 아르페지오) ───────────────────────────
+// ─── 팡파레 ──────────────────────────────────────────────────
 function playFanfare(ctx) {
-  const t = ctx.currentTime;
-  const playNote = (freq, offset) => {
-    const osc = ctx.createOscillator(); 
-    const gain = ctx.createGain();
-    osc.type = 'sine'; 
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.2, t + offset); 
-    gain.gain.exponentialRampToValueAtTime(0.01, t + offset + 0.15);
-    osc.connect(gain); 
-    gain.connect(ctx.destination);
-    osc.start(t + offset); 
-    osc.stop(t + offset + 0.2);
-  };
-  playNote(523.25, 0);   
-  playNote(659.25, 0.1); 
-  playNote(783.99, 0.2); 
-  playNote(1046.50, 0.3); 
-  return 600; // ms
+  const t = ctx.currentTime
+  const note = (freq, offset) => {
+    const osc = ctx.createOscillator()
+    const g   = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.value = freq
+    g.gain.setValueAtTime(0.2, t + offset)
+    g.gain.exponentialRampToValueAtTime(0.01, t + offset + 0.15)
+    osc.connect(g); g.connect(ctx.destination)
+    osc.start(t + offset); osc.stop(t + offset + 0.2)
+  }
+  note(523.25, 0); note(659.25, 0.1); note(783.99, 0.2); note(1046.50, 0.3)
+  return 700
 }
 
 // ─── 틱 소리 ─────────────────────────────────────────────────
 function playTick(ctx) {
-  const osc  = ctx.createOscillator()
-  const gain = ctx.createGain()
-  osc.type             = 'sine'
-  osc.frequency.value = 850
-  gain.gain.setValueAtTime(0.15, ctx.currentTime)
-  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
-  osc.connect(gain); gain.connect(ctx.destination)
+  const osc = ctx.createOscillator()
+  const g   = ctx.createGain()
+  osc.type = 'sine'; osc.frequency.value = 850
+  g.gain.setValueAtTime(0.15, ctx.currentTime)
+  g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
+  osc.connect(g); g.connect(ctx.destination)
   osc.start(); osc.stop(ctx.currentTime + 0.06)
 }
 
-// ─── 무적 TTS 엔진 ──────────────────────────────
+// ─── ★ 수정된 TTS 함수 ────────────────────────────────────────
+// 핵심: cancel() 후 반드시 150ms 대기 후 speak()
+// 이전 utterance 참조 유지 (GC 방지), 최대 5개로 제한
+const uttCache = []
+
 function speakSafe(text, voice) {
   return new Promise((resolve) => {
-    window.speechSynthesis.cancel();
-    const utt   = new SpeechSynthesisUtterance(text);
-    utt.lang    = 'ko-KR';
-    if(voice) utt.voice = voice;
-    utt.rate    = 1.1; 
-    
-    // 브라우저가 버리지 못하게 글로벌 락
-    window.utterances.push(utt);
+    let resolved = false
+    const done = () => { if (!resolved) { resolved = true; resolve() } }
 
-    let resolved = false;
-    const safeResolve = () => {
-      if (resolved) return;
-      resolved = true;
-      resolve();
-    };
+    // 1. 이전 발화 취소
+    window.speechSynthesis.cancel()
 
-    utt.onend   = safeResolve;
-    utt.onerror = safeResolve;
-    window.speechSynthesis.speak(utt);
+    // 2. ★ 150ms 대기 (cancel 직후 speak 묵음 버그 방지)
+    setTimeout(() => {
+      const utt = new SpeechSynthesisUtterance(text)
+      utt.lang   = 'ko-KR'
+      utt.rate   = 1.1
+      utt.volume = 1.0
+      if (voice) utt.voice = voice
 
-    // 완벽한 타임아웃 보험 (글자당 150ms + 1초 여유)
-    const fallbackTime = Math.max(text.length * 150 + 1000, 2000);
-    setTimeout(safeResolve, fallbackTime);
-  });
+      // GC 방지: 참조 유지, 최대 5개
+      uttCache.push(utt)
+      if (uttCache.length > 5) uttCache.shift()
+
+      utt.onend   = done
+      utt.onerror = done
+
+      window.speechSynthesis.speak(utt)
+
+      // 안전망: 글자당 150ms + 2초
+      const maxMs = Math.max(text.length * 150 + 2000, 3000)
+      setTimeout(done, maxMs)
+    }, 150)
+  })
 }
 
 function delay(ms) {
@@ -110,11 +113,9 @@ export default function GameScreen() {
     category, hint,
     youtubeId, youtubeStart, youtubeEnd,
     roundActive, lastResult, targetScore,
-    timeLimit: serverTimeLimit,
-    isTimerRunning
+    timeLimit: serverTimeLimit
   } = state
 
-  // ── UI 상태 ──────────────────────────────────────────────
   const [soundUnlocked, setSoundUnlocked] = useState(false)
   const [isPlaying,     setIsPlaying]     = useState(false)
   const [timerActive,   setTimerActive]   = useState(false)
@@ -127,7 +128,6 @@ export default function GameScreen() {
   const [showResult,    setShowResult]    = useState(false)
   const [playbackError, setPlaybackError] = useState(false)
 
-  // ── Ref ──────────────────────────────────────────────────
   const inputRef           = useRef(null)
   const playerRef          = useRef(null)
   const audioCtxRef        = useRef(null)
@@ -147,18 +147,20 @@ export default function GameScreen() {
     return audioCtxRef.current
   }, [])
 
+  // 한국어 음성 초기화
   useEffect(() => {
-    const initVoice = () => {
+    const init = () => {
       const voices = window.speechSynthesis.getVoices()
-      const ko     = voices.filter(v => v.lang.startsWith('ko'))
+      const ko = voices.filter(v => v.lang.startsWith('ko'))
       korVoiceRef.current = (
         ko.find(v => /natural|premium|google|siri|yuna/i.test(v.name)) || ko[0] || null
       )
     }
-    initVoice();
-    window.speechSynthesis.onvoiceschanged = initVoice;
+    init()
+    window.speechSynthesis.onvoiceschanged = init
   }, [])
 
+  // YouTube Player 초기화
   useEffect(() => {
     let destroyed = false
     loadYouTubeApi().then(YT => {
@@ -167,9 +169,9 @@ export default function GameScreen() {
         width: 1, height: 1,
         playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, playsinline: 1, rel: 0 },
         events: {
-          onReady:       () => setMediaReady(true),
+          onReady: () => setMediaReady(true),
           onStateChange: (e) => ytStateHandlerRef.current(e),
-          onError:       () => {
+          onError: () => {
             setIsPlaying(false)
             setPlaybackError(true)
             musicEndResolveRef.current?.()
@@ -181,15 +183,15 @@ export default function GameScreen() {
     return () => { destroyed = true; playerRef.current?.destroy?.() }
   }, [])
 
+  // YouTube 상태 핸들러
   const ytStateHandlerRef = useRef()
   ytStateHandlerRef.current = (event) => {
     if (event.data === YT_STATE.PLAYING) {
       setIsPlaying(true)
       setPlaybackError(false)
-
       if (!musicStartedRef.current) {
         musicStartedRef.current = true
-        emit('music_started') // 💡 서버로 타이머 가동 신호
+        emit('music_started')
       }
     }
     if (event.data === YT_STATE.PAUSED || event.data === YT_STATE.ENDED) {
@@ -201,23 +203,24 @@ export default function GameScreen() {
     }
   }
 
-  // ── 서버 timer_start 수신 ────────────
+  // ★ timer_start 수신 — useSocket의 on() 직접 사용
   useEffect(() => {
     const unsub = on('timer_start', ({ timeLimit }) => {
+      console.log('[timer_start] 수신:', timeLimit)
       setTimerLimit(timeLimit)
       setTimerActive(true)
-      setPhaseLabel('⌨️ 정답을 입력하세요!')
     })
     return unsub
   }, [on])
 
+  // 음악 재생 Promise
   function playMusic(videoId, startSec, endSec, signal) {
     return new Promise((resolve) => {
       if (signal?.aborted) { resolve(); return }
 
       const start   = Number(startSec) || 0
       const end     = Number(endSec)   || 0
-      const clipSec = (end > start) ? (end - start) : 10 // 기본 10초 재생으로 고정
+      const clipSec = (end > start) ? (end - start) : 10
 
       let resolved = false
       const safeResolve = () => {
@@ -233,17 +236,14 @@ export default function GameScreen() {
         playerRef.current?.loadVideoById({
           videoId,
           startSeconds: start,
-          endSeconds:   end > start ? end : undefined
+          endSeconds: end > start ? end : undefined
         })
         setTimeout(() => {
           if (signal?.aborted) { safeResolve(); return }
           playerRef.current?.playVideo?.()
         }, 300)
-      } catch(e) {
-        safeResolve(); return
-      }
+      } catch(e) { safeResolve(); return }
 
-      // 10초가 지나면 무조건 노래 끊고 리졸브 (틱틱 시작)
       const safetyTimer = setTimeout(() => {
         try { playerRef.current?.stopVideo?.() } catch(e) {}
         safeResolve()
@@ -255,21 +255,18 @@ export default function GameScreen() {
         safeResolve()
       })
 
-      const origSafe = safeResolve
-      musicEndResolveRef.current = () => {
-        clearTimeout(safetyTimer)
-        origSafe()
-      }
+      const orig = safeResolve
+      musicEndResolveRef.current = () => { clearTimeout(safetyTimer); orig() }
     })
   }
 
-  // ── 남은 시간까지 틱 소리 재생 ──────────────────────────
+  // 틱 소리 — 서버가 끊을 때까지 반복
   function playTicksTillEnd(signal) {
     return new Promise(resolve => {
       clearInterval(tickRef.current)
       tickRef.current = setInterval(() => {
         if (signal?.aborted) {
-          clearInterval(tickRef.current); resolve(); return;
+          clearInterval(tickRef.current); resolve(); return
         }
         const ctx = getAudioCtx()
         if (ctx) playTick(ctx)
@@ -277,10 +274,14 @@ export default function GameScreen() {
     })
   }
 
+  // 언락 버튼
   const handleUnlock = useCallback(async () => {
     const ctx = getAudioCtx()
     if (ctx?.state === 'suspended') await ctx.resume()
 
+    // ★ 워밍업: cancel 후 150ms 대기 후 빈 발화
+    window.speechSynthesis.cancel()
+    await delay(150)
     const warmup = new SpeechSynthesisUtterance(' ')
     warmup.volume = 0
     warmup.lang   = 'ko-KR'
@@ -293,7 +294,7 @@ export default function GameScreen() {
     }
   }, [getAudioCtx])
 
-  // ── 완벽히 제어되는 라운드 시퀀스 파이프라인 ────────────────
+  // 라운드 시퀀스
   useEffect(() => {
     if (!soundUnlocked || !roundActive) return
 
@@ -305,12 +306,12 @@ export default function GameScreen() {
     setAnswer(''); setSubmitted(false); setFlashWrong(false)
     setIsPlaying(false); setTimerActive(false)
     setShowResult(false); setPlaybackError(false)
-    musicStartedRef.current = false 
+    musicStartedRef.current = false
 
     async function runSequence() {
       const ctx = getAudioCtx()
 
-      // 1. 오프닝 로직
+      // 1. 오프닝 (1회)
       if (!openingDoneRef.current) {
         openingDoneRef.current = true
         setPhaseLabel('🎙️ 오프닝 안내 방송 중...')
@@ -318,41 +319,43 @@ export default function GameScreen() {
         if (ctx) {
           if (ctx.state === 'suspended') await ctx.resume()
           playFanfare(ctx)
+          await delay(700) // 팡파레 끝날 때까지
         }
         if (sig.aborted) return
 
         await speakSafe(
-          `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. 답이 무엇인지 알 것 같다면 정답을 입력해주세요. 입력한 답이 맞다면 1점을 얻습니다. ${targetScore}점을 먼저 달성한 사람이 승리합니다. 자, 이제 시작해볼까요?`,
+          `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. ` +
+          `답이 무엇인지 알 것 같다면 정답을 입력해주세요. ` +
+          `입력한 답이 맞다면 1점을 얻습니다. ` +
+          `${targetScore}점을 먼저 달성한 사람이 승리합니다. ` +
+          `자, 이제 시작해볼까요?`,
           korVoiceRef.current
         )
         if (sig.aborted) return
-        await delay(1000) // 멘트 끝나고 1초 대기
+        await delay(1000)
         if (sig.aborted) return
       }
 
-      // 2. 주제 안내 로직
+      // 2. 주제 안내
       if (category) {
         setPhaseLabel(`🎵 주제: ${category}`)
         await speakSafe(category, korVoiceRef.current)
         if (sig.aborted) return
-        await delay(500) // 주제 안내 후 0.5초 대기
+        await delay(500)
         if (sig.aborted) return
       }
 
-      // 3. 유튜브 음악 가동
-      if (!youtubeId) {
-        emit('skip_round')
-        return
-      }
+      // 3. 음악 재생
+      if (!youtubeId) { emit('skip_round'); return }
 
       setPhaseLabel('🎧 소리를 들어보세요!')
       await playMusic(youtubeId, youtubeStart, youtubeEnd, sig)
       if (sig.aborted) return
 
-      // 4. 음악 10초 끝난 직후 틱-틱 사운드 작동
+      // 4. 틱 소리 (서버 타이머 종료까지)
       setIsPlaying(false)
       setPhaseLabel('⌨️ 정답을 입력하세요!')
-      await playTicksTillEnd(sig) // 서버 타이머가 끝내줄 때까지 틱틱 소리 반복
+      await playTicksTillEnd(sig)
     }
 
     runSequence()
@@ -365,6 +368,7 @@ export default function GameScreen() {
     }
   }, [soundUnlocked, roundActive, youtubeId, currentRound, category, targetScore, emit, getAudioCtx])
 
+  // 라운드 비활성화 정리
   useEffect(() => {
     if (!roundActive) {
       seqAbortRef.current?.abort()
@@ -375,22 +379,23 @@ export default function GameScreen() {
     }
   }, [roundActive])
 
+  // 결과 수신
   useEffect(() => {
     if (!lastResult) return
-    const isRound = lastResult.correct || lastResult.noWinner || lastResult.winnerId
-    if (!isRound) return
+    if (!lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) return
 
     seqAbortRef.current?.abort()
     clearInterval(tickRef.current)
     try { playerRef.current?.stopVideo?.() } catch(e) {}
     setIsPlaying(false)
     setTimerActive(false)
-
     setShowResult(true)
+
     const t = setTimeout(() => setShowResult(false), 2500)
     return () => clearTimeout(t)
   }, [lastResult])
 
+  // 개인 오답
   useEffect(() => {
     if (!lastResult) return
     if (lastResult.correct || lastResult.noWinner || lastResult.winnerId) return
@@ -401,6 +406,7 @@ export default function GameScreen() {
     return () => clearTimeout(t)
   }, [lastResult])
 
+  // 포커스
   useEffect(() => {
     if (roundActive && soundUnlocked)
       setTimeout(() => inputRef.current?.focus(), 300)
@@ -419,10 +425,13 @@ export default function GameScreen() {
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
+
+      {/* YouTube 숨김 플레이어 */}
       <div style={{ position:'absolute', width:1, height:1, overflow:'hidden', opacity:0, pointerEvents:'none' }}>
         <div id={hostElemId.current} />
       </div>
 
+      {/* 언락 오버레이 */}
       {!soundUnlocked && (
         <div onClick={handleUnlock} style={{
           position:'fixed', inset:0, zIndex:99999,
@@ -433,7 +442,8 @@ export default function GameScreen() {
         }}>
           <div style={{ fontSize:'5rem', animation:'float 1.5s ease-in-out infinite' }}>🎵</div>
           <h2 style={{
-            fontSize:'1.8rem', color:'#06b6d4', textShadow:'0 0 15px rgba(6,182,212,0.6)',
+            fontSize:'1.8rem', color:'#06b6d4',
+            textShadow:'0 0 15px rgba(6,182,212,0.6)',
             textAlign:'center', padding:'0 24px', wordBreak:'keep-all'
           }}>
             화면을 터치해서 게임을 시작하세요
@@ -444,6 +454,7 @@ export default function GameScreen() {
         </div>
       )}
 
+      {/* 결과 오버레이 */}
       {showResult && lastResult && (
         <div className="result-overlay show">
           {lastResult.winnerId && (
@@ -467,7 +478,10 @@ export default function GameScreen() {
         </div>
       )}
 
+      {/* 게임 레이아웃 */}
       <div className="game-layout">
+
+        {/* 스코어보드 */}
         <div className="scoreboard-panel glass-panel">
           <div className="scoreboard-title">🏆 스코어보드</div>
           <div className="score-list">
@@ -493,6 +507,7 @@ export default function GameScreen() {
           </div>
         </div>
 
+        {/* 메인 */}
         <div className="game-center">
           <div className="round-progress">
             <div className="round-info">
@@ -559,13 +574,13 @@ export default function GameScreen() {
           </div>
         </div>
 
+        {/* 타이머 */}
         <div className="timer-panel glass-panel">
           <div className="timer-label">남은 시간</div>
-          {/* 💡 서버와 상태 동기화를 위해 isTimerRunning을 키에 포함시킴 */}
           <TimerRing
-            key={`${currentRound}-${timerActive || isTimerRunning}`}
+            key={`${currentRound}-${timerActive}`}
             timeLimit={timerLimit}
-            active={timerActive || isTimerRunning}
+            active={timerActive}
           />
           <div className="timer-hint">빠를수록 유리!</div>
         </div>
