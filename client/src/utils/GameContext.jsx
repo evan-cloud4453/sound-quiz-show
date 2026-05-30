@@ -88,6 +88,8 @@ function reducer(state, action) {
         ...state,
         screen: 'gameover',
         winner: action.data.winner,
+        isDraw: action.data.isDraw,
+        drawPlayers: action.data.drawPlayers,
         finalScores: action.data.finalScores,
         roundActive: false
       }
