@@ -12,7 +12,7 @@ const RANK_MEDALS = ['🥇', '🥈', '🥉']
 
 export default function GameOverScreen() {
   const { state, startGame, backToTitle } = useGame()
-  const { winner, finalScores, isHost, myId, nickname, roomCode, targetScore } = state
+  const { winner, isDraw, drawPlayers, finalScores, isHost, myId, nickname, roomCode, targetScore } = state
   const [showConfetti, setShowConfetti] = useState(false)
   const [restarting, setRestarting] = useState(false)
 
@@ -39,20 +39,37 @@ export default function GameOverScreen() {
 
         {/* Winner announcement */}
         <div className="winner-section animate-fadeInUp">
-          {isWinner ? (
+          // 렌더 부분
+          {isDraw ? (
             <>
-              <div className="winner-trophy">🏆</div>
-              <h1 className="winner-title glow-gold">우승!</h1>
-              <p className="winner-sub">당신이 사운드 캐치 챔피언입니다!</p>
+              <div className="winner-trophy">🤝</div>
+              <h1 className="winner-title glow-cyan">무승부!</h1>
+              <p className="winner-sub">
+                {drawPlayers?.map(p => p.nickname).join(', ')}
+                {' — 공동 1위!'}
+              </p>
             </>
+          ) : winner ? (
+            isWinner ? (
+              <>
+                <div className="winner-trophy">🏆</div>
+                <h1 className="winner-title glow-gold">우승!</h1>
+                <p className="winner-sub">당신이 챔피언입니다!</p>
+              </>
+            ) : (
+              <>
+                <div className="winner-trophy">🎮</div>
+                <h1 className="winner-title">
+                  <span className="glow-cyan">{winner.nickname}</span> 우승!
+                </h1>
+                <p className="winner-sub">다음엔 더 빠르게!</p>
+              </>
+            )
           ) : (
             <>
-              <div className="winner-trophy" style={{ filter: 'grayscale(0.3)' }}>🎮</div>
-              <h1 className="winner-title">
-                <span className="glow-cyan">{winner?.nickname}</span>
-                <span> 우승!</span>
-              </h1>
-              <p className="winner-sub">다음에는 더 빠르게 도전해보세요!</p>
+              <div className="winner-trophy">🎮</div>
+              <h1 className="winner-title glow-purple">게임 종료!</h1>
+              <p className="winner-sub">수고하셨습니다!</p>
             </>
           )}
         </div>
