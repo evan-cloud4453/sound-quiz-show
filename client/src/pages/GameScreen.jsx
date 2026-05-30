@@ -139,6 +139,12 @@ export default function GameScreen() {
   const tickRef            = useRef(null)
   const musicStartedRef    = useRef(false)
 
+  const categoryRef = useRef(category)
+  useEffect(() => { categoryRef.current = category }, [category])
+  
+  const targetScoreRef = useRef(targetScore)
+  useEffect(() => { targetScoreRef.current = targetScore }, [targetScore])
+
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current) {
       const Ctor = window.AudioContext || window.webkitAudioContext
@@ -366,7 +372,7 @@ export default function GameScreen() {
       window.speechSynthesis.cancel()
       try { playerRef.current?.stopVideo?.() } catch(e) {}
     }
-  }, [soundUnlocked, roundActive, youtubeId, currentRound, category, targetScore, emit, getAudioCtx])
+  }, [soundUnlocked, roundActive, youtubeId, currentRound, emit, getAudioCtx])
 
   // 라운드 비활성화 정리
   useEffect(() => {
