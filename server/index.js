@@ -398,23 +398,43 @@ function checkEndOrNextRound(room) {
 }
 
 function endGame(room) {
-  clearRoomTimers(room);
+  clearRoomTimers(room)
 
-  const finalScores = [...room.players].sort((a, b) => b.score - a.score);
-  let winner = null;
-  
+  // ① 점수 초기화 전에 finalScores 캡처
+  const finalScores = [...room.players]
+    .sort((a, b) => b.score - a.score)
+    .map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+
+  // ② 승리/무승부 판정
+  let winner = null
+  let isDraw = false
+
   if (finalScores.length > 0 && finalScores[0].score > 0) {
-    const top      = finalScores[0].score;
-    const topGroup = finalScores.filter(p => p.score === top);
-    if (topGroup.length === 1) winner = topGroup[0]; // 무승부 판정 완벽 유지
+    const topScore = finalScores[0].score
+    const topGroup = finalScores.filter(p => p.score === topScore)
+    if (topGroup.length === 1) {
+      winner = topGroup[0]
+    } else {
+      isDraw = true // 동점자 2명 이상
+    }
   }
 
-  room.status       = 'WAITING';
-  room.currentRound = 0;
-  room.players.forEach(p => { p.score = 0; p.isReady = false; });
+  // ③ game_over 먼저 emit (점수 초기화 전!)
+  io.to(room.code).emit('game_over', {
+    winner,
+    isDraw,
+    drawPlayers: isDraw ? finalScores.filter(p => p.score === finalScores[0].score) : [],
+    finalScores,
+    roomCode: room.code
+  })
 
-  io.to(room.code).emit('game_over', { winner, finalScores, roomCode: room.code });
-  setTimeout(() => io.to(room.code).emit('room_update', getRoomState(room)), 1000);
+  // ④ 1.5초 후 방 상태 초기화 (game_over 수신 후에 초기화)
+  setTimeout(() => {
+    room.status = 'WAITING'
+    room.currentRound = 0
+    room.players.forEach(p => { p.score = 0; p.isReady = false })
+    io.to(room.code).emit('room_update', getRoomState(room))
+  }, 1500)
 }
 
 const PORT = process.env.PORT || 3001;
