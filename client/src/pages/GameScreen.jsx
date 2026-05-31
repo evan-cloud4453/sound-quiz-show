@@ -275,23 +275,35 @@ export default function GameScreen() {
 
   // 언락 버튼
   const handleUnlock = useCallback(async () => {
-    const ctx = getAudioCtx()
-    if (ctx?.state === 'suspended') await ctx.resume()
+  const ctx = getAudioCtx()
+  if (ctx?.state === 'suspended') await ctx.resume()
 
-    setSoundUnlocked(true)
-    if (playerRef.current?.playVideo) {
-      playerRef.current.playVideo()
-      setTimeout(() => playerRef.current?.pauseVideo?.(), 200)
-    }
-  }, [getAudioCtx])
+  // ★ AudioContext 완전히 깨울 때까지 대기 (무음 버퍼 재생)
+  await new Promise(resolve => {
+    const buf = ctx.createBuffer(1, 1, 22050)
+    const src = ctx.createBufferSource()
+    src.buffer = buf
+    src.connect(ctx.destination)
+    src.onended = resolve
+    src.start(0)
+    setTimeout(resolve, 300) // 안전망
+  })
+
+  setSoundUnlocked(true)
+  if (playerRef.current?.playVideo) {
+    playerRef.current.playVideo()
+    setTimeout(() => playerRef.current?.pauseVideo?.(), 200)
+  }
+}, [getAudioCtx])
 
   // 라운드 시퀀스
   useEffect(() => {
     if (!soundUnlocked || !roundActive) return
 
-    seqAbortRef.current?.abort()
-    const ac  = new AbortController()
+    const prevAc = seqAbortRef.current
+    const ac = new AbortController()
     seqAbortRef.current = ac
+    prevAc?.abort()
     const sig = ac.signal
 
     setAnswer(''); setSubmitted(false); setFlashWrong(false)
@@ -384,11 +396,16 @@ export default function GameScreen() {
   // 개인 오답
   useEffect(() => {
     if (!lastResult) return
-    if (lastResult.correct || lastResult.noWinner || lastResult.winnerId) return
-    setSubmitted(false); setAnswer('')
-    setFlashWrong(true)
-    const t = setTimeout(() => setFlashWrong(false), 600)
-    inputRef.current?.focus()
+    if (!lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) return
+  
+    // ★ abort 하지 않음 — 다음 라운드 시퀀스는 roundActive 변경으로 자연스럽게 재시작
+    clearInterval(tickRef.current)
+    try { playerRef.current?.stopVideo?.() } catch(e) {}
+    setIsPlaying(false)
+    setTimerActive(false)
+    setShowResult(true)
+  
+    const t = setTimeout(() => setShowResult(false), 2500)
     return () => clearTimeout(t)
   }, [lastResult])
 
