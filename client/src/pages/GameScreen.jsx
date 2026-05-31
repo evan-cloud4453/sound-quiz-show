@@ -70,6 +70,9 @@ const CATEGORY_AUDIO = {
   '해외 팝송':       '/sounds/categories/해외팝송.mp3',
   '한국 영화 OST':   '/sounds/categories/한국영화OST.mp3',
   '영화/애니 OST':   '/sounds/categories/영화애니OST.mp3',
+  '최신 K-POP':      '/sounds/categories/최신KPOP.mp3',
+  '국내 솔로/힙합':  '/sounds/categories/국내솔로힙합.mp3',
+  'OST & 밈':        '/sounds/categories/OST밈.mp3',
 }
 
 const OPENING_AUDIO = '/sounds/opening.mp3'
