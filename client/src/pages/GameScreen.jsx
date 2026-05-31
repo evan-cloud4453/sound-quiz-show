@@ -64,37 +64,27 @@ function playTick(ctx) {
 // ─── ★ 수정된 TTS 함수 ────────────────────────────────────────
 // 핵심: cancel() 후 반드시 150ms 대기 후 speak()
 // 이전 utterance 참조 유지 (GC 방지), 최대 5개로 제한
-const uttCache = []
+const CATEGORY_AUDIO = {
+  '한국 드라마 OST': '/sounds/categories/한국드라마OST.mp3',
+  '한국 인기가요':   '/sounds/categories/한국인기가요.mp3',
+  '해외 팝송':       '/sounds/categories/해외팝송.mp3',
+  '한국 영화 OST':   '/sounds/categories/한국영화OST.mp3',
+  '영화/애니 OST':   '/sounds/categories/영화애니OST.mp3',
+}
 
-function speakSafe(text, voice) {
+const OPENING_AUDIO = '/sounds/opening.mp3'
+
+function playAudioFile(src, signal) {
   return new Promise((resolve) => {
-    let resolved = false
-    const done = () => { if (!resolved) { resolved = true; resolve() } }
-
-    // 1. 이전 발화 취소
-    window.speechSynthesis.cancel()
-
-    // 2. ★ 150ms 대기 (cancel 직후 speak 묵음 버그 방지)
-    setTimeout(() => {
-      const utt = new SpeechSynthesisUtterance(text)
-      utt.lang   = 'ko-KR'
-      utt.rate   = 1.1
-      utt.volume = 1.0
-      if (voice) utt.voice = voice
-
-      // GC 방지: 참조 유지, 최대 5개
-      uttCache.push(utt)
-      if (uttCache.length > 5) uttCache.shift()
-
-      utt.onend   = done
-      utt.onerror = done
-
-      window.speechSynthesis.speak(utt)
-
-      // 안전망: 글자당 150ms + 2초
-      const maxMs = Math.max(text.length * 150 + 2000, 3000)
-      setTimeout(done, maxMs)
-    }, 150)
+    if (signal?.aborted) { resolve(); return }
+    const audio = new Audio(src)
+    audio.volume = 1.0
+    let done = false
+    const finish = () => { if (!done) { done = true; resolve() } }
+    audio.onended = finish
+    audio.onerror = finish  // 파일 없으면 그냥 넘어감
+    signal?.addEventListener('abort', () => { audio.pause(); finish() })
+    audio.play().catch(finish)
   })
 }
 
@@ -285,14 +275,6 @@ export default function GameScreen() {
     const ctx = getAudioCtx()
     if (ctx?.state === 'suspended') await ctx.resume()
 
-    // ★ 워밍업: cancel 후 150ms 대기 후 빈 발화
-    window.speechSynthesis.cancel()
-    await delay(150)
-    const warmup = new SpeechSynthesisUtterance(' ')
-    warmup.volume = 0
-    warmup.lang   = 'ko-KR'
-    window.speechSynthesis.speak(warmup)
-
     setSoundUnlocked(true)
     if (playerRef.current?.playVideo) {
       playerRef.current.playVideo()
@@ -316,49 +298,44 @@ export default function GameScreen() {
 
     async function runSequence() {
       const ctx = getAudioCtx()
-
+    
       // 1. 오프닝 (1회)
       if (!openingDoneRef.current) {
         openingDoneRef.current = true
         setPhaseLabel('🎙️ 오프닝 안내 방송 중...')
-
-        if (ctx) {
-          if (ctx.state === 'suspended') await ctx.resume()
-          playFanfare(ctx)
-          await delay(700) // 팡파레 끝날 때까지
-        }
+        if (ctx?.state === 'suspended') await ctx.resume()
+    
+        // 팡파레 + 오프닝 MP3 순서대로
+        playFanfare(ctx)
+        await delay(700)
         if (sig.aborted) return
-
-        await speakSafe(
-          `여러분 안녕하세요. 소리를 듣고 정답을 최대한 빨리 맞춰주세요. ` +
-          `답이 무엇인지 알 것 같다면 정답을 입력해주세요. ` +
-          `입력한 답이 맞다면 1점을 얻습니다. ` +
-          `${targetScore}점을 먼저 달성한 사람이 승리합니다. ` +
-          `자, 이제 시작해볼까요?`,
-          korVoiceRef.current
-        )
-        if (sig.aborted) return
-        await delay(1000)
-        if (sig.aborted) return
-      }
-
-      // 2. 주제 안내
-      if (category) {
-        setPhaseLabel(`🎵 주제: ${category}`)
-        await speakSafe(category, korVoiceRef.current)
+    
+        await playAudioFile(OPENING_AUDIO, sig)  // opening.mp3 길이만큼 대기
         if (sig.aborted) return
         await delay(500)
         if (sig.aborted) return
       }
-
-      // 3. 음악 재생
+    
+      // 2. 주제 안내 MP3
+      const currentCategory = categoryRef.current
+      if (currentCategory) {
+        setPhaseLabel(`🎵 주제: ${currentCategory}`)
+        const catSrc = CATEGORY_AUDIO[currentCategory]
+        if (catSrc) {
+          await playAudioFile(catSrc, sig)  // MP3 길이만큼 대기
+          if (sig.aborted) return
+        }
+        await delay(500)
+        if (sig.aborted) return
+      }
+    
+      // 3. 음악 재생 (기존 그대로)
       if (!youtubeId) { emit('skip_round'); return }
-
       setPhaseLabel('🎧 소리를 들어보세요!')
       await playMusic(youtubeId, youtubeStart, youtubeEnd, sig)
       if (sig.aborted) return
-
-      // 4. 틱 소리 (서버 타이머 종료까지)
+    
+      // 4. 틱 소리 (기존 그대로)
       setIsPlaying(false)
       setPhaseLabel('⌨️ 정답을 입력하세요!')
       await playTicksTillEnd(sig)
