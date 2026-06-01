@@ -64,10 +64,10 @@ const RAW_QUIZ_DATA = [
 { id: 'kg02', category: '가요', youtubeId: 'ArmDp-zijuc', youtubeStart: 33, youtubeEnd: 43, hint: 'I'm super shy, super shy', answers: ['super shy', '슈퍼 샤이'], difficulty: 1 },
 { id: 'kg03', category: '가요', youtubeId: 'Q3K0TOvTOno', youtubeStart: 52, youtubeEnd: 62, hint: '뉴진스의 달콤한 신곡 (2024)', answers: ['how sweet', '하우스윗'], difficulty: 2 },
 { id: 'kg04', category: '가요', youtubeId: 'Y8JFxS1HlDo', youtubeStart: 57, youtubeEnd: 67, hint: '숨참고 LOVE DIVE', answers: ['love dive', '러브 다이브'], difficulty: 1 },
-{ id: 'kg05', category: '가요', youtubeId: '6ZUIwj3FgUY', youtubeStart: 44, youtubeEnd: 54, hint: 'That's my life is a 아름다운 갤럭시', answers: ['i am', '아이엠'], difficulty: 1 },
+{ id: 'kg05', category: '가요', youtubeId: '6ZUIwj3FgUY', youtubeStart: 44, youtubeEnd: 54, hint: 'Thats my life is a 아름다운 갤럭시', answers: ['i am', '아이엠'], difficulty: 1 },
 { id: 'kg06', category: '가요', youtubeId: '07EzMbVH3QE', youtubeStart: 48, youtubeEnd: 58, hint: '해야 해야 해야 한입에 널 삼킬게', answers: ['해야', 'heya'], difficulty: 2 },
 { id: 'kg07', category: '가요', youtubeId: 'phuiiNCxRMg', youtubeStart: 39, youtubeEnd: 49, hint: '사건은 다가와 Ah Oh Ay', answers: ['supernova', '슈퍼노바'], difficulty: 1 },
-{ id: 'kg08', category: '가요', youtubeId: '4TWR90KJl84', youtubeStart: 55, youtubeEnd: 65, hint: 'I'm on the Next Level', answers: ['next level', '넥스트 레벨'], difficulty: 1 },
+{ id: 'kg08', category: '가요', youtubeId: '4TWR90KJl84', youtubeStart: 55, youtubeEnd: 65, hint: 'Im on the Next Level', answers: ['next level', '넥스트 레벨'], difficulty: 1 },
 { id: 'kg09', category: '가요', youtubeId: 'D8VEhcPeSlc', youtubeStart: 46, youtubeEnd: 56, hint: '에스파의 트라우마를 깨는 곡', answers: ['drama', '드라마'], difficulty: 2 },
 { id: 'kg10', category: '가요', youtubeId: 'pyf8cbqyfPs', youtubeStart: 41, youtubeEnd: 51, hint: 'Anti ti ti ti fragile', answers: ['antifragile', '안티프래자일'], difficulty: 1 },
 { id: 'kg11', category: '가요', youtubeId: 'hLvWy2b857I', youtubeStart: 36, youtubeEnd: 46, hint: '르세라핌의 오버워치 콜라보 곡', answers: ['perfect night', '퍼펙트 나이트'], difficulty: 2 },
@@ -512,4 +512,5 @@ const RAW_QUIZ_DATA = [
 { id: 'dn014', category: '춤의 종류', youtubeId: 'kcFqCe6BSt4', youtubeStart: 30, youtubeEnd: 40, hint: '줄을 넘으며 추는 에너지 넘치는 춤', answers: ['점프스타일', '점핑댄스', 'jumpstyle'], difficulty: 3 },
 { id: 'dn015', category: '춤의 종류', youtubeId: 'hxzLIQMok78', youtubeStart: 20, youtubeEnd: 30, hint: '로봇처럼 움직이는 팝핀 춤', answers: ['팝핀', '로봇댄스', 'popping'], difficulty: 2 },
 ];
+
 module.exports = { RAW_QUIZ_DATA };
