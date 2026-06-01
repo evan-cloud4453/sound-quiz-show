@@ -39,7 +39,6 @@ export default function GameOverScreen() {
 
         {/* Winner announcement */}
         <div className="winner-section animate-fadeInUp">
-          // 렌더 부분
           {isDraw ? (
             <>
               <div className="winner-trophy">🤝</div>
