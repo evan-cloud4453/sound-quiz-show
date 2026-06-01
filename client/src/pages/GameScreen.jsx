@@ -361,9 +361,12 @@ export default function GameScreen() {
       const currentCategory = categoryRef.current
       if (currentCategory) {
         setPhaseLabel(`🎵 주제: ${currentCategory}`)
-        const catSrc = CATEGORY_AUDIO[currentCategory]
+        
+        const cleanCategory = currentCategory.replace(/[^가-힣a-zA-Z0-9]/g, '')
+        const catSrc = CATEGORY_AUDIO[cleanCategory]
+        
         if (catSrc) {
-          await delay(500)
+          await delay(100)
           await playAudioFile(catSrc, sig)  // MP3 길이만큼 대기
           if (sig.aborted) return
         }
