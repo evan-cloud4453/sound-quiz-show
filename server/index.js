@@ -247,6 +247,20 @@ io.on('connection', (socket) => {
       });
 
       cb?.({ success: true });
+      
+      // ★ 로버스트 로직: 서버 상태를 동기화 대기(SYNCING)로 변경
+      room.status = 'SYNCING'; 
+      
+      // ★ 타임아웃(10초) 설정: 누군가 튕기거나 안 눌러도 10초 뒤 무조건 강제 시작 (무한 대기 방지)
+      room.syncTimeout = setTimeout(() => {
+        if (room.status === 'SYNCING') {
+          console.log(`[강제 시작] 방 ${room.code} 터치 대기 시간 초과`);
+          room.status = 'PLAYING';
+          startRound(room);
+        }
+      }, 10000);
+
+      cb?.({ success: true });
       room.waitingForUnlocks = true; // 서버가 플레이어들의 화면 터치를 기다림
     } catch (e) {
       console.error(e);
@@ -257,23 +271,18 @@ io.on('connection', (socket) => {
   socket.on('ready_to_start', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
-      if (!room) return;
+      if (!room || room.status !== 'SYNCING') return; // SYNCING 상태일 때만 유효
 
       const player = room.players.find(p => p.id === socket.id);
       if (player) player.isAudioUnlocked = true;
 
-      // 게임이 시작되었고(waitingForUnlocks), 모든 유저가 터치를 완료했는지 확인
-      if (room.waitingForUnlocks) {
-        const allUnlocked = room.players.every(p => p.isAudioUnlocked);
-        if (allUnlocked) {
-          room.waitingForUnlocks = false;
-          
-          // ★ 핵심 추가: 프론트엔드에 안내 멘트를 시작하라는 큐 사인 발송
-          io.to(room.code).emit('all_players_ready');
-          
-          // 1초 뒤 1라운드 데이터 전송
-          setTimeout(() => startRound(room), 1000); 
-        }
+      // 혼자 테스트 중이거나, 모든 인원이 터치를 완료했는지 확인
+      const allUnlocked = room.players.every(p => p.isAudioUnlocked);
+      
+      if (allUnlocked) {
+        clearTimeout(room.syncTimeout); // 타임아웃 캔슬
+        room.status = 'PLAYING';
+        startRound(room); // 서버가 즉시 라운드 시작 신호(round_start)를 모두에게 쏨!
       }
     } catch (e) {
       console.error(e);
