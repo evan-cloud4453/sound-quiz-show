@@ -334,7 +334,6 @@ export default function GameScreen() {
         if (ctx?.state === 'suspended') await ctx.resume()
     
         // 팡파레 + 오프닝 MP3 순서대로
-        playFanfare(ctx)
         await delay(700)
         if (sig.aborted) return
     
