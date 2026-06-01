@@ -357,7 +357,7 @@ export default function GameScreen() {
         if (sig.aborted) return
       }
     
-      // 2. 주제 안내 MP3
+      // 2. 주제 안내 MP3 (기계음 제거, 타이밍만 유지)
       const currentCategory = categoryRef.current
       if (currentCategory) {
         setPhaseLabel(`🎵 주제: ${currentCategory}`)
@@ -369,14 +369,20 @@ export default function GameScreen() {
           // 재생 시작 시간 기록
           const startTime = Date.now();
           
-          const isSuccess = await playAudioFile(catSrc, sig)
+          await playAudioFile(catSrc, sig)
           if (sig.aborted) return
           
-          // 파일이 너무 빨리 끝났더라도(예: 0.5초), 무조건 최소 2.5초는 기다리도록 강제 연장
+          // 파일이 1초 미만으로 너무 짧게 끝나거나 실패하더라도 흐름을 위해 최소 2.5초는 대기
           const elapsedTime = Date.now() - startTime;
           if (elapsedTime < 2500) {
             await delay(2500 - elapsedTime);
           }
+        } else {
+          // 파일이 아예 누락된 경우 기계음 없이 콘솔에 경고만 띄우고 2.5초 대기
+          console.warn(`[오디오 누락] '${cleanCategory}' 파일 없음`)
+          await delay(2500)
+        }
+        
         await delay(500)
         if (sig.aborted) return
       }
