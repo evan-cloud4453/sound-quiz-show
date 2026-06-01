@@ -366,10 +366,17 @@ export default function GameScreen() {
         const catSrc = CATEGORY_AUDIO[cleanCategory]
         
         if (catSrc) {
-          await delay(100)
-          await playAudioFile(catSrc, sig)  // MP3 길이만큼 대기
+          // 재생 시작 시간 기록
+          const startTime = Date.now();
+          
+          const isSuccess = await playAudioFile(catSrc, sig)
           if (sig.aborted) return
-        }
+          
+          // 파일이 너무 빨리 끝났더라도(예: 0.5초), 무조건 최소 2.5초는 기다리도록 강제 연장
+          const elapsedTime = Date.now() - startTime;
+          if (elapsedTime < 2500) {
+            await delay(2500 - elapsedTime);
+          }
         await delay(500)
         if (sig.aborted) return
       }
