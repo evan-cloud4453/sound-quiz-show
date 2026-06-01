@@ -204,7 +204,7 @@ io.on('connection', (socket) => {
       room.players.push({
         id: socket.id,
         nickname: nickname || `플레이어${room.players.length + 1}`,
-        score: 0, isReady: false
+        score: 0, isReady: false,
         isAudioUnlocked: false
       });
 
