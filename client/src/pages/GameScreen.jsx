@@ -17,6 +17,7 @@ const AVATARS  = ['🚀','⭐','🌙','💫','🪐','☄️','🌟','🎵','👾
 function getAvatar(id) {
   return AVATARS[(id?.charCodeAt(id.length - 1) || 0) % AVATARS.length]
 }
+const [allReady, setAllReady] = useState(false) // 추가: 모두 준비되었는지 확인
 
 // ─── YouTube API 싱글톤 ───────────────────────────────────────
 let ytApiPromise = null
@@ -159,6 +160,14 @@ export default function GameScreen() {
     return audioCtxRef.current
   }, [])
 
+  // 모두가 터치(준비)를 완료했다는 서버 신호 수신
+  useEffect(() => {
+    const unsub = on('all_players_ready', () => {
+      setAllReady(true)
+    })
+    return unsub
+  }, [on])
+
   // 한국어 음성 초기화
   useEffect(() => {
     const init = () => {
@@ -291,6 +300,10 @@ export default function GameScreen() {
   const ctx = getAudioCtx()
   if (ctx?.state === 'suspended') await ctx.resume()
 
+  // ★ 추가: HTML5 Audio 객체 정책 우회를 위한 빈 소리 1회 재생
+  const dummyAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA')
+  dummyAudio.play().catch(() => {}) // 에러가 나도 무시 (언락이 목적)
+
   // ★ AudioContext 완전히 깨울 때까지 대기 (무음 버퍼 재생)
   await new Promise(resolve => {
     const buf = ctx.createBuffer(1, 1, 22050)
@@ -303,6 +316,8 @@ export default function GameScreen() {
   })
 
   setSoundUnlocked(true)
+  emit('ready_to_start')
+  setPhaseLabel('다른 플레이어들을 기다리는 중...')
   if (playerRef.current?.playVideo) {
     playerRef.current.playVideo()
     setTimeout(() => playerRef.current?.pauseVideo?.(), 200)
@@ -311,7 +326,7 @@ export default function GameScreen() {
 
   // 라운드 시퀀스
   useEffect(() => {
-    if (!soundUnlocked || !roundActive) return
+    if (!allReady || !roundActive) return
 
     const prevAc = seqAbortRef.current
     const ac = new AbortController()
@@ -376,7 +391,7 @@ export default function GameScreen() {
       window.speechSynthesis.cancel()
       try { playerRef.current?.stopVideo?.() } catch(e) {}
     }
-  }, [soundUnlocked, roundActive, youtubeId, currentRound, emit, getAudioCtx])
+  }, [allReady, roundActive, youtubeId, currentRound, emit, getAudioCtx])
 
   // 라운드 비활성화 정리
   useEffect(() => {
@@ -405,19 +420,24 @@ export default function GameScreen() {
     return () => clearTimeout(t)
   }, [lastResult])
 
-  // 개인 오답
+  // 개인 오답 시 입력창 잠금 해제 및 빨간 화면(flashWrong) 처리
   useEffect(() => {
     if (!lastResult) return
-    if (!lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) return
-  
-    // ★ abort 하지 않음 — 다음 라운드 시퀀스는 roundActive 변경으로 자연스럽게 재시작
-    clearInterval(tickRef.current)
-    try { playerRef.current?.stopVideo?.() } catch(e) {}
-    setIsPlaying(false)
-    setTimerActive(false)
-    setShowResult(true)
-  
-    const t = setTimeout(() => setShowResult(false), 2500)
+    // 누군가 정답을 맞히거나(winnerId) 시간초과(noWinner)로 라운드가 완전히 끝난 경우는 무시
+    if (lastResult.correct || lastResult.winnerId || lastResult.noWinner) return
+    
+    // 만약 틀린 사람이 '나'라면 (서버에서 lastResult에 틀린 사람의 id를 userId 등으로 보내준다고 가정)
+    // (서버가 별도 ID를 안 준다면 본인 화면에서 틀렸다는 응답이 왔을 때로 처리)
+    setFlashWrong(true)   // 빨간 화면 깜빡임
+    setSubmitted(false)   // ★ 핵심: 입력창 잠금 해제
+    setAnswer('')         // 입력창 비우기
+    
+    // 1초 뒤 빨간 화면 깜빡임 효과 제거
+    const t = setTimeout(() => {
+      setFlashWrong(false)
+      inputRef.current?.focus() // 다시 타자 칠 수 있게 포커스
+    }, 1000)
+    
     return () => clearTimeout(t)
   }, [lastResult])
 
