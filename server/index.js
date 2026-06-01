@@ -319,7 +319,7 @@ io.on('connection', (socket) => {
         socket.emit('answer_result', {
           correct:  false,
           playerId: socket.id,
-          message:  '틀렸습니다! 다시 시도해보세요.'
+          message:  '틀렸습니다! 다시 시도해보세요.',
           winnerId: null, 
           noWinner: false
         });
