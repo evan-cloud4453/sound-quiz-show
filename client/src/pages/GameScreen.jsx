@@ -72,23 +72,22 @@ const CATEGORY_AUDIO = {
   '영화': '/sounds/categories/영화.mp3',
   '애니메이션': '/sounds/categories/애니메이션.mp3',
   '동요': '/sounds/categories/동요.mp3',
-  '클래식 음악': '/sounds/categories/클래식음악.mp3',
+  '클래식음악': '/sounds/categories/클래식음악.mp3',
   '작곡가': '/sounds/categories/작곡가.mp3',
-  '공연 예술': '/sounds/categories/공연예술.mp3',
+  '공연예술': '/sounds/categories/공연예술.mp3',
   '스포츠': '/sounds/categories/스포츠.mp3',
   '운송수단': '/sounds/categories/운송수단.mp3',
   '악기': '/sounds/categories/악기.mp3',
   '동물': '/sounds/categories/동물.mp3',
   '계절': '/sounds/categories/계절.mp3',
   '자연현상': '/sounds/categories/자연현상.mp3',
-  '불쾌한 소리': '/sounds/categories/불쾌한소리.mp3',
+  '불쾌한소리': '/sounds/categories/불쾌한소리.mp3',
   '직업': '/sounds/categories/직업.mp3',
-  '물건/장소': '/sounds/categories/물건장소.mp3',
+  '물건장소': '/sounds/categories/물건장소.mp3',
   '나라': '/sounds/categories/나라.mp3',
   '언어': '/sounds/categories/언어.mp3',
-  '춤의 종류': '/sounds/categories/춤의종류.mp3'
+  '춤의종류': '/sounds/categories/춤의종류.mp3'
 };
-
 const OPENING_AUDIO = '/sounds/opening.mp3'
 
 function playAudioFile(src, signal) {
