@@ -65,15 +65,28 @@ function playTick(ctx) {
 // 핵심: cancel() 후 반드시 150ms 대기 후 speak()
 // 이전 utterance 참조 유지 (GC 방지), 최대 5개로 제한
 const CATEGORY_AUDIO = {
-  '한국 드라마 OST': '/sounds/categories/한국드라마OST.mp3',
-  '한국 인기가요':   '/sounds/categories/한국인기가요.mp3',
-  '해외 팝송':       '/sounds/categories/해외팝송.mp3',
-  '한국 영화 OST':   '/sounds/categories/한국영화OST.mp3',
-  '영화/애니 OST':   '/sounds/categories/영화애니OST.mp3',
-  '최신 K-POP':      '/sounds/categories/최신KPOP.mp3',
-  '국내 솔로/힙합':  '/sounds/categories/국내솔로힙합.mp3',
-  'OST & 밈':        '/sounds/categories/OST밈.mp3',
-}
+  '드라마': '/sounds/categories/드라마.mp3',
+  '가요': '/sounds/categories/가요.mp3',
+  '팝송': '/sounds/categories/팝송.mp3',
+  '영화': '/sounds/categories/영화.mp3',
+  '애니메이션': '/sounds/categories/애니메이션.mp3',
+  '동요': '/sounds/categories/동요.mp3',
+  '클래식 음악': '/sounds/categories/클래식음악.mp3',
+  '작곡가': '/sounds/categories/작곡가.mp3',
+  '공연 예술': '/sounds/categories/공연예술.mp3',
+  '스포츠': '/sounds/categories/스포츠.mp3',
+  '운송수단': '/sounds/categories/운송수단.mp3',
+  '악기': '/sounds/categories/악기.mp3',
+  '동물': '/sounds/categories/동물.mp3',
+  '계절': '/sounds/categories/계절.mp3',
+  '자연현상': '/sounds/categories/자연현상.mp3',
+  '불쾌한 소리': '/sounds/categories/불쾌한소리.mp3',
+  '직업': '/sounds/categories/직업.mp3',
+  '물건/장소': '/sounds/categories/물건장소.mp3',
+  '나라': '/sounds/categories/나라.mp3',
+  '언어': '/sounds/categories/언어.mp3',
+  '춤의 종류': '/sounds/categories/춤의종류.mp3'
+};
 
 const OPENING_AUDIO = '/sounds/opening.mp3'
 
