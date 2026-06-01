@@ -364,6 +364,7 @@ export default function GameScreen() {
         setPhaseLabel(`🎵 주제: ${currentCategory}`)
         const catSrc = CATEGORY_AUDIO[currentCategory]
         if (catSrc) {
+          await delay(500)
           await playAudioFile(catSrc, sig)  // MP3 길이만큼 대기
           if (sig.aborted) return
         }
