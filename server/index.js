@@ -235,7 +235,10 @@ io.on('connection', (socket) => {
       room.targetScore  = Number(targetScore) || 5;
       room.questions    = questions;
       room.totalRounds  = questions.length;
-      room.players.forEach(p => { p.score = 0; });
+      room.players.forEach(p => { 
+        p.score = 0; 
+        p.isAudioUnlocked = false; // ★ 추가: 게임 시작 시 터치 상태 초기화
+      });
 
       io.to(room.code).emit('room_update', getRoomState(room));
       io.to(room.code).emit('game_started', {
@@ -264,7 +267,11 @@ io.on('connection', (socket) => {
         const allUnlocked = room.players.every(p => p.isAudioUnlocked);
         if (allUnlocked) {
           room.waitingForUnlocks = false;
-          // 전원 완료 시 드디어 1라운드 시작
+          
+          // ★ 핵심 추가: 프론트엔드에 안내 멘트를 시작하라는 큐 사인 발송
+          io.to(room.code).emit('all_players_ready');
+          
+          // 1초 뒤 1라운드 데이터 전송
           setTimeout(() => startRound(room), 1000); 
         }
       }
