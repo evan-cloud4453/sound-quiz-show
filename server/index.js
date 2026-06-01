@@ -205,6 +205,7 @@ io.on('connection', (socket) => {
         id: socket.id,
         nickname: nickname || `플레이어${room.players.length + 1}`,
         score: 0, isReady: false
+        isAudioUnlocked: false
       });
 
       socket.join(room.code);
@@ -243,12 +244,35 @@ io.on('connection', (socket) => {
       });
 
       cb?.({ success: true });
-      setTimeout(() => startRound(room), 1500);
+      room.waitingForUnlocks = true; // 서버가 플레이어들의 화면 터치를 기다림
     } catch (e) {
       console.error(e);
       cb?.({ error: '서버 오류가 발생했습니다.' });
     }
   });
+
+  socket.on('ready_to_start', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) return;
+
+      const player = room.players.find(p => p.id === socket.id);
+      if (player) player.isAudioUnlocked = true;
+
+      // 게임이 시작되었고(waitingForUnlocks), 모든 유저가 터치를 완료했는지 확인
+      if (room.waitingForUnlocks) {
+        const allUnlocked = room.players.every(p => p.isAudioUnlocked);
+        if (allUnlocked) {
+          room.waitingForUnlocks = false;
+          // 전원 완료 시 드디어 1라운드 시작
+          setTimeout(() => startRound(room), 1000); 
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
 
   socket.on('music_started', () => {
     try {
@@ -296,6 +320,8 @@ io.on('connection', (socket) => {
           correct:  false,
           playerId: socket.id,
           message:  '틀렸습니다! 다시 시도해보세요.'
+          winnerId: null, 
+          noWinner: false
         });
       }
     } catch (e) {
