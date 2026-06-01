@@ -536,3 +536,5 @@ const RAW_QUIZ_DATA = [
   { id: 'dn015', category: '춤의 종류', youtubeId: 'R4r9lv8MMIw', youtubeStart: 30, youtubeEnd: 40, hint: '로봇처럼 움직이는 팝핀 춤', answers: ['팝핀', '로봇댄스', 'popping'], difficulty: 2 },
  
 ];
+
+module.exports = { RAW_QUIZ_DATA };
