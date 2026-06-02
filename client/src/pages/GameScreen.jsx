@@ -109,7 +109,7 @@ function delay(ms) {
 
 // ─── 메인 컴포넌트 ────────────────────────────────────────────
 export default function GameScreen() {
-  const { state, submitAnswer } = useGame()
+  const { state, submitAnswer, backToTitle } = useGame()
   const { emit, on }            = useSocket()
 
   const {
@@ -132,6 +132,7 @@ export default function GameScreen() {
   const [phaseLabel,    setPhaseLabel]    = useState('접속 대기 중...')
   const [showResult,    setShowResult]    = useState(false)
   const [playbackError, setPlaybackError] = useState(false)
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false) // ★ 뒤로가기 방지 모달
 
   const inputRef           = useRef(null)
   const playerRef          = useRef(null)
@@ -157,6 +158,32 @@ export default function GameScreen() {
     }
     return audioCtxRef.current
   }, [])
+
+  // ─── 뒤로가기 / 새로고침 실수 방지 ──────────────────────────
+  // 더미 히스토리 항목을 쌓아 뒤로가기 1회를 흡수하고, 대신 확인 모달을 띄운다.
+  useEffect(() => {
+    window.history.pushState({ guard: true }, '')
+
+    const onPop = () => {
+      setShowLeaveConfirm(true)
+      window.history.pushState({ guard: true }, '') // 가드 재충전
+    }
+    window.addEventListener('popstate', onPop)
+
+    // 새로고침/탭 닫기 → 브라우저 기본 경고창
+    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', onBeforeUnload)
+
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
+  }, [])
+
+  const confirmLeave = useCallback(() => {
+    setShowLeaveConfirm(false)
+    backToTitle() // 메인으로. GameScreen 언마운트 → 위 리스너 자동 정리
+  }, [backToTitle])
 
   // 한국어 음성 초기화
   useEffect(() => {
@@ -472,6 +499,36 @@ export default function GameScreen() {
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
+
+      {/* ★ 나가기 확인 모달 (뒤로가기/실수 방지) */}
+      {showLeaveConfirm && (
+        <div
+          onClick={() => setShowLeaveConfirm(false)}
+          style={{
+            position:'fixed', inset:0, zIndex:100000,
+            background:'rgba(4,5,15,0.7)', backdropFilter:'blur(8px)',
+            display:'flex', alignItems:'center', justifyContent:'center', padding:16
+          }}
+        >
+          <div
+            className="glass-panel animate-scaleIn"
+            onClick={e => e.stopPropagation()}
+            style={{ width:'100%', maxWidth:380, padding:24, textAlign:'center' }}
+          >
+            <div style={{ fontSize:'2.5rem', marginBottom:12 }}>🚪</div>
+            <h2 style={{ marginBottom:8 }}>게임을 나가시겠어요?</h2>
+            <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem', marginBottom:20 }}>
+              지금 나가면 진행 중인 게임에서 빠지게 됩니다.
+            </p>
+            <div style={{ display:'flex', gap:10 }}>
+              <button className="btn btn-secondary" style={{ flex:1 }}
+                      onClick={() => setShowLeaveConfirm(false)}>계속하기</button>
+              <button className="btn btn-primary" style={{ flex:1 }}
+                      onClick={confirmLeave}>나가기</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* YouTube 숨김 플레이어 */}
       <div style={{ position:'absolute', width:1, height:1, overflow:'hidden', opacity:0, pointerEvents:'none' }}>
