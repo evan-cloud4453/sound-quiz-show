@@ -147,7 +147,7 @@ function reducer(state, action) {
 
 export function GameProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
-  const { emit, on, connected } = useSocket()
+  const { emit, on, connected, socketId } = useSocket()
 
   // Listen to socket events
   useEffect(() => {
@@ -167,6 +167,10 @@ export function GameProvider({ children }) {
     ]
     return () => unsubs.forEach(u => u())
   }, [on])
+
+  useEffect(() => {
+    if (socketId) dispatch({ type: 'SET_MY_ID', id: socketId })
+  }, [socketId, connected])
 
   const joinRoom = useCallback((nickname, roomCode) => {
     emit('join_room', { nickname, roomCode: roomCode || undefined }, (res) => {
