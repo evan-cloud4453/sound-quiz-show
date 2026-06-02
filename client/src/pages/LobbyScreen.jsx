@@ -83,7 +83,7 @@ export default function LobbyScreen() {
                 {roomCode}
               </span>
               <button className="copy-btn" onClick={copyCode}>
-                {copied ? '복사됨' : '복사'}
+                {copied ? '✅ 복사됨' : '📋 복사'}
               </button>
             </div>
             <p className="room-code-hint">친구에게 이 코드를 알려주세요!</p>
@@ -223,7 +223,7 @@ export default function LobbyScreen() {
                 onClick={handleStart}
                 disabled={starting || players.length < 1}
               >
-                {starting ? '게임 시작 중...' : `게임 시작! (${players.length}명)`}
+                {starting ? '🚀 게임 시작 중...' : `🚀 게임 시작! (${players.length}명)`}
               </button>
             </div>
           ) : (
@@ -288,33 +288,81 @@ export default function LobbyScreen() {
               </div>
             </div>
 
-            {/* 주제 선택 */}
+            {/* 주제 선택 — 세로 스택 + 스크롤 체크리스트 */}
             <div className="setting-row" style={{ marginBottom: 8 }}>
-              <label>출제 주제 ({catSummary})</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                <button
-                  className={`score-option ${selectedCats.length === 0 ? 'active' : ''}`}
-                  onClick={() => setSelectedCats([])}
-                  style={{ minWidth: 64 }}
-                >
-                  전체
-                </button>
-                {availableCategories.map(cat => (
-                  <button
-                    key={cat}
-                    className={`score-option ${selectedCats.includes(cat) ? 'active' : ''}`}
-                    onClick={() => toggleCategory(cat)}
-                    style={{ minWidth: 'auto', padding: '8px 12px' }}
-                  >
-                    {cat}
-                  </button>
-                ))}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <label style={{ margin: 0 }}>출제 주제</label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>{catSummary}</span>
+                  <button className="copy-btn" onClick={() => setSelectedCats([])}>전체 해제</button>
+                  <button className="copy-btn" onClick={() => setSelectedCats(availableCategories)}>전체 선택</button>
+                </div>
               </div>
-              {availableCategories.length === 0 && (
-                <p style={{ color: 'var(--text-dim)', fontSize: '0.8rem', marginTop: 8 }}>
-                  주제 목록을 불러오는 중...
-                </p>
-              )}
+
+              <div style={{
+                maxHeight: 260,
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                padding: 6,
+                borderRadius: 'var(--radius-lg, 12px)',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)'
+              }}>
+                {availableCategories.length === 0 ? (
+                  <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', textAlign: 'center', padding: '16px 0' }}>
+                    주제 목록을 불러오는 중...
+                  </p>
+                ) : (
+                  availableCategories.map(cat => {
+                    const on = selectedCats.includes(cat)
+                    return (
+                      <button
+                        key={cat}
+                        onClick={() => toggleCategory(cat)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '10px 12px',
+                          borderRadius: 10,
+                          cursor: 'pointer',
+                          fontSize: '0.92rem',
+                          color: 'var(--text-primary)',
+                          background: on ? 'rgba(124,58,237,0.22)' : 'transparent',
+                          border: on
+                            ? '1px solid rgba(124,58,237,0.6)'
+                            : '1px solid rgba(255,255,255,0.08)',
+                          transition: 'background 0.15s, border 0.15s'
+                        }}
+                      >
+                        <span style={{
+                          flexShrink: 0,
+                          width: 20,
+                          height: 20,
+                          borderRadius: 6,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.8rem',
+                          color: '#fff',
+                          background: on
+                            ? 'linear-gradient(135deg, var(--purple-core), var(--cyan-core))'
+                            : 'rgba(255,255,255,0.06)',
+                          border: on ? 'none' : '1px solid rgba(255,255,255,0.18)'
+                        }}>
+                          {on ? '✓' : ''}
+                        </span>
+                        <span>{cat}</span>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+
               <p style={{ color: 'var(--text-dim)', fontSize: '0.78rem', marginTop: 10 }}>
                 * 아무것도 선택하지 않으면 전체 주제에서 출제됩니다.
               </p>
@@ -325,7 +373,7 @@ export default function LobbyScreen() {
               onClick={() => setShowSettings(false)}
               style={{ marginTop: 16 }}
             >
-              설정 완료
+              ✅ 설정 완료
             </button>
           </div>
         </div>
