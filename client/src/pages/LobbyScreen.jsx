@@ -147,7 +147,7 @@ export default function LobbyScreen() {
               padding: '8px 4px'
             }}>
               {chatMessages.length === 0 && (
-                <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', textAlign: 'center', margin: 'auto', alignSelf: 'center'}}>
+                <div className="glass-panel animate-fadeInUp" style={{ animationDelay: '0.2s', display: 'flex', flexDirection: 'column', minHeight: 0, padding: 24 }}>
                   아직 메시지가 없어요. 첫 인사를 건네보세요! 👋
                 </p>
               )}
