@@ -54,7 +54,9 @@ export function useSocket() {
       'game_over',
       'system_message',
       'timer_start',    // ★ 타이머 이벤트 명시적 등록
-      'hint_revealed'
+      'hint_revealed',
+      'chat_message',   // ★ 채팅
+      'back_to_lobby'   // ★ 게임 종료 후 대기방 복귀
     ]
 
     const forwarders = {}
