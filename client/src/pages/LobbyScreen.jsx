@@ -83,7 +83,7 @@ export default function LobbyScreen() {
                 {roomCode}
               </span>
               <button className="copy-btn" onClick={copyCode}>
-                {copied ? '✅ 복사됨' : '📋 복사'}
+                {copied ? '복사됨' : '복사'}
               </button>
             </div>
             <p className="room-code-hint">친구에게 이 코드를 알려주세요!</p>
@@ -147,7 +147,7 @@ export default function LobbyScreen() {
               padding: '8px 4px'
             }}>
               {chatMessages.length === 0 && (
-                <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', textAlign: 'center', margin: 'auto 0' }}>
+                <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', textAlign: 'center', margin: 'auto' }}>
                   아직 메시지가 없어요. 첫 인사를 건네보세요! 👋
                 </p>
               )}
@@ -223,7 +223,7 @@ export default function LobbyScreen() {
                 onClick={handleStart}
                 disabled={starting || players.length < 1}
               >
-                {starting ? '🚀 게임 시작 중...' : `🚀 게임 시작! (${players.length}명)`}
+                {starting ? '게임 시작 중...' : `게임 시작! (${players.length}명)`}
               </button>
             </div>
           ) : (
@@ -325,7 +325,7 @@ export default function LobbyScreen() {
               onClick={() => setShowSettings(false)}
               style={{ marginTop: 16 }}
             >
-              ✅ 설정 완료
+              설정 완료
             </button>
           </div>
         </div>
