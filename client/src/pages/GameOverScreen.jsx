@@ -11,10 +11,15 @@ function getAvatar(id) {
 const RANK_MEDALS = ['🥇', '🥈', '🥉']
 
 export default function GameOverScreen() {
-  const { state, startGame, backToTitle } = useGame()
-  const { winner, isDraw, drawPlayers, finalScores, isHost, myId, nickname, roomCode, targetScore } = state
+  const { state, startGame, returnToLobby, backToTitle } = useGame()
+  const {
+    winner, isDraw, drawPlayers, finalScores, myId, nickname, roomCode,
+    targetScore, roundCount, selectedCategories, hostId
+  } = state
+  const isHost = state.isHost || myId === hostId
   const [showConfetti, setShowConfetti] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  const [returning, setReturning] = useState(false)
 
   const isWinner = winner && (winner.id === myId || winner.nickname === nickname)
 
@@ -27,8 +32,15 @@ export default function GameOverScreen() {
   const handleRematch = async () => {
     if (restarting) return
     setRestarting(true)
-    await startGame(targetScore)
+    // 직전 게임 설정(목표 점수·라운드 수·주제)을 그대로 재사용
+    await startGame({ targetScore, roundCount, categories: selectedCategories })
     setRestarting(false)
+  }
+
+  const handleReturnToLobby = () => {
+    if (returning) return
+    setReturning(true)
+    returnToLobby() // 서버가 모두를 대기방으로 보냄 (back_to_lobby)
   }
 
   return (
@@ -113,22 +125,30 @@ export default function GameOverScreen() {
 
         {/* Action buttons */}
         <div className="gameover-actions animate-fadeInUp" style={{ animationDelay: '0.4s' }}>
-          {isHost && (
-            <button
-              className="btn btn-primary btn-lg action-btn"
-              onClick={handleRematch}
-              disabled={restarting}
-            >
-              {restarting ? '⏳ 시작 중...' : '🚀 다시 하기!'}
-            </button>
-          )}
-          {!isHost && (
+          {isHost ? (
+            <>
+              <button
+                className="btn btn-primary btn-lg action-btn"
+                onClick={handleRematch}
+                disabled={restarting || returning}
+              >
+                {restarting ? '⏳ 시작 중...' : '🚀 바로 다시 하기!'}
+              </button>
+              <button
+                className="btn btn-secondary action-btn"
+                onClick={handleReturnToLobby}
+                disabled={restarting || returning}
+              >
+                {returning ? '⏳ 이동 중...' : '🛋️ 대기방으로 돌아가기'}
+              </button>
+            </>
+          ) : (
             <div className="waiting-rematch glass-panel">
-              <span>🕐 방장이 다시 시작하기를 기다리는 중...</span>
+              <span>🕐 방장이 다음 행동을 선택하는 중...</span>
             </div>
           )}
           <button className="btn btn-secondary action-btn" onClick={backToTitle}>
-            🏠 메인으로 돌아가기
+            🏠 메인으로 나가기
           </button>
         </div>
 
