@@ -17,7 +17,6 @@ const AVATARS  = ['🚀','⭐','🌙','💫','🪐','☄️','🌟','🎵','👾
 function getAvatar(id) {
   return AVATARS[(id?.charCodeAt(id.length - 1) || 0) % AVATARS.length]
 }
-const [allReady, setAllReady] = useState(false) // 추가: 모두 준비되었는지 확인
 
 // ─── YouTube API 싱글톤 ───────────────────────────────────────
 let ytApiPromise = null
@@ -74,7 +73,7 @@ const CATEGORY_AUDIO = {
   '동요': '/sounds/categories/동요.mp3',
   '클래식음악': '/sounds/categories/클래식음악.mp3',
   '작곡가': '/sounds/categories/작곡가.mp3',
-  '공연예술': '/sounds/categories/공연예술.mp3',
+  '공연예술': '/sounds/categories/공연 예술.mp3', // 실제 파일명에 공백이 있어 경로도 공백 유지
   '스포츠': '/sounds/categories/스포츠.mp3',
   '운송수단': '/sounds/categories/운송수단.mp3',
   '악기': '/sounds/categories/악기.mp3',
@@ -98,7 +97,7 @@ function playAudioFile(src, signal) {
     let done = false
     const finish = () => { if (!done) { done = true; resolve() } }
     audio.onended = finish
-    audio.onerror = finish  // 파일 없으면 그냥 넘어감
+    audio.onerror = () => { console.warn(`[오디오 재생 실패] ${src}`); finish() }  // 파일 없으면 그냥 넘어감
     signal?.addEventListener('abort', () => { audio.pause(); finish() })
     audio.play().catch(finish)
   })
@@ -158,14 +157,6 @@ export default function GameScreen() {
     }
     return audioCtxRef.current
   }, [])
-
-  // 모두가 터치(준비)를 완료했다는 서버 신호 수신
-  useEffect(() => {
-    const unsub = on('all_players_ready', () => {
-      setAllReady(true)
-    })
-    return unsub
-  }, [on])
 
   // 한국어 음성 초기화
   useEffect(() => {
@@ -324,8 +315,11 @@ export default function GameScreen() {
 }, [getAudioCtx])
 
   // 라운드 시퀀스
+  // allReady(서버가 보내지 않는 이벤트) 대신 soundUnlocked로 게이트.
+  // 준비 동기화는 서버 ready_to_start 로직이 담당하므로, 클라이언트는
+  // round_start로 roundActive가 켜지면 바로 시퀀스를 돌리면 된다.
   useEffect(() => {
-    if (!allReady || !roundActive) return
+    if (!soundUnlocked || !roundActive) return
 
     const prevAc = seqAbortRef.current
     const ac = new AbortController()
@@ -362,7 +356,9 @@ export default function GameScreen() {
       if (currentCategory) {
         setPhaseLabel(`🎵 주제: ${currentCategory}`)
         
-        const cleanCategory = currentCategory.replace(/[^가-힣a-zA-Z0-9]/g, '')
+        // ★ NFC 정규화 먼저: macOS 등에서 자소분리(NFD)된 한글도 정상 매칭되게 함.
+        //   (정규화 없이 [^가-힣...] 정규식을 돌리면 NFD 문자열이 통째로 지워짐)
+        const cleanCategory = currentCategory.normalize('NFC').replace(/[^가-힣a-zA-Z0-9]/g, '')
         const catSrc = CATEGORY_AUDIO[cleanCategory]
         
         if (catSrc) {
@@ -407,7 +403,7 @@ export default function GameScreen() {
       window.speechSynthesis.cancel()
       try { playerRef.current?.stopVideo?.() } catch(e) {}
     }
-  }, [allReady, roundActive, youtubeId, currentRound, emit, getAudioCtx])
+  }, [soundUnlocked, roundActive, youtubeId, currentRound, emit, getAudioCtx])
 
   // 라운드 비활성화 정리
   useEffect(() => {
