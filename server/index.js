@@ -39,6 +39,9 @@ const QUIZ_DATA = RAW_QUIZ_DATA.map(q => ({
 
 let VALIDATED_QUIZ_DATA = [];
 
+// 설정창에서 고를 수 있는 주제 목록 (원본 데이터 기준, 항상 사용 가능)
+const ALL_CATEGORIES = [...new Set(QUIZ_DATA.map(q => q.category))];
+
 function checkYouTubeValid(youtubeId) {
   return new Promise((resolve) => {
     const url = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}`;
@@ -73,10 +76,17 @@ function generateRoomCode() {
   return code;
 }
 
-function getRandomQuestions(count = 10) {
-  return [...VALIDATED_QUIZ_DATA]
+function getRandomQuestions(count = 10, categories = []) {
+  // 선택한 주제만 필터링. 선택이 없거나 결과가 0개면 전체에서 출제.
+  let pool = VALIDATED_QUIZ_DATA;
+  if (Array.isArray(categories) && categories.length > 0) {
+    const set = new Set(categories);
+    const filtered = VALIDATED_QUIZ_DATA.filter(q => set.has(q.category));
+    if (filtered.length > 0) pool = filtered;
+  }
+  return [...pool]
     .sort(() => Math.random() - 0.5)
-    .slice(0, Math.min(count, VALIDATED_QUIZ_DATA.length));
+    .slice(0, Math.min(count, pool.length));
 }
 
 function normalise(text) {
@@ -124,6 +134,9 @@ function getRoomState(room) {
     currentRound:  room.currentRound,
     totalRounds:   room.totalRounds,
     targetScore:   room.targetScore,
+    roundCount:    room.roundCount,
+    selectedCategories: room.selectedCategories || [],
+    categories:    ALL_CATEGORIES, // 설정창용 주제 목록
     isTimerRunning: !!room.roundTimer // 💡 프론트엔드 타이머 애니메이션 트리거
   };
 }
@@ -190,6 +203,8 @@ io.on('connection', (socket) => {
           currentRound:         0,
           totalRounds:          ROUND_COUNT,
           targetScore:          5,
+          roundCount:           ROUND_COUNT,
+          selectedCategories:   [],
           questions:            [],
           roundTimer:           null,
           fallbackTimer:        null,
@@ -220,21 +235,24 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('start_game', ({ targetScore = 5 }, cb) => {
+  socket.on('start_game', ({ targetScore = 5, roundCount = ROUND_COUNT, categories = [] } = {}, cb) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room)                     return cb?.({ error: '방을 찾을 수 없습니다.' });
       if (room.hostId !== socket.id) return cb?.({ error: '방장만 게임을 시작할 수 있습니다.' });
       if (room.status === 'PLAYING') return cb?.({ error: '이미 게임 중입니다.' });
 
-      const questions = getRandomQuestions(ROUND_COUNT);
-      if (questions.length === 0)    return cb?.({ error: '출제 가능한 문제가 없습니다.' });
+      const count = Math.max(1, Math.min(Number(roundCount) || ROUND_COUNT, 30));
+      const questions = getRandomQuestions(count, categories);
+      if (questions.length === 0)    return cb?.({ error: '선택한 주제에 출제 가능한 문제가 없습니다.' });
 
-      room.status       = 'PLAYING';
-      room.currentRound = 0;
-      room.targetScore  = Number(targetScore) || 5;
-      room.questions    = questions;
-      room.totalRounds  = questions.length;
+      room.status             = 'PLAYING';
+      room.currentRound       = 0;
+      room.targetScore        = Number(targetScore) || 5;
+      room.roundCount         = count;
+      room.selectedCategories = Array.isArray(categories) ? categories : [];
+      room.questions          = questions;
+      room.totalRounds        = questions.length;
       room.players.forEach(p => { 
         p.score = 0; 
         p.isAudioUnlocked = false; // ★ 추가: 게임 시작 시 터치 상태 초기화
@@ -365,6 +383,48 @@ io.on('connection', (socket) => {
       setTimeout(() => checkEndOrNextRound(room), 2500);
     } catch (e) {
       console.error(e);
+    }
+  });
+
+  // ── 채팅 ────────────────────────────────────────────────────
+  socket.on('chat_message', ({ text } = {}) => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) return;
+      const player = room.players.find(p => p.id === socket.id);
+      const clean  = String(text || '').slice(0, 200).trim();
+      if (!clean) return;
+      io.to(room.code).emit('chat_message', {
+        id:       `${socket.id}-${Date.now()}`,
+        playerId: socket.id,
+        nickname: player?.nickname || '익명',
+        text:     clean,
+        ts:       Date.now()
+      });
+    } catch (e) {
+      console.error('chat_message 오류:', e);
+    }
+  });
+
+  // ── 게임 종료 후 대기방으로 복귀 (방장만) ─────────────────────
+  socket.on('return_to_lobby', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.hostId !== socket.id) return;
+
+      clearRoomTimers(room);
+      room.status              = 'WAITING';
+      room.currentRound        = 0;
+      room.questions           = [];
+      room.answeredThisRound   = false;
+      room.firstCorrectPlayerId = null;
+      room.musicStartedSockets = new Set();
+      room.players.forEach(p => { p.score = 0; p.isReady = false; p.isAudioUnlocked = false; });
+
+      io.to(room.code).emit('room_update', getRoomState(room));
+      io.to(room.code).emit('back_to_lobby'); // 모든 클라이언트를 대기방 화면으로
+    } catch (e) {
+      console.error('return_to_lobby 오류:', e);
     }
   });
 
