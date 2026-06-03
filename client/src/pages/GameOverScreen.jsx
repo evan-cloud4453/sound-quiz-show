@@ -34,8 +34,8 @@ export default function GameOverScreen() {
   const handleRematch = async () => {
     if (restarting) return
     setRestarting(true)
-    // 직전 게임 설정(목표 점수·라운드 수·주제)을 그대로 재사용
-    await startGame({ targetScore, roundCount, categories: selectedCategories })
+    // 직전 게임 설정(목표 점수·라운드 수·주제)을 그대로 재사용 + 오프닝 설명 자동 스킵
+    await startGame({ targetScore, roundCount, categories: selectedCategories, autoSkipOpening: true })
     setRestarting(false)
   }
 
