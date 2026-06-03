@@ -1,8 +1,18 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useGame } from '../utils/GameContext'
 import './TitleScreen.css'
 
 const AVATARS = ['🚀', '⭐', '🌙', '💫', '🪐', '☄️', '🌟', '🎵']
+
+// 우주 컨셉 랜덤 닉네임 (형용사 + 명사 조합)
+const NICK_ADJ = ['빛나는', '용감한', '신비한', '떠도는', '고요한', '반짝이는', '무중력', '초신성', '은하수', '불타는', '얼어붙은', '머나먼', '광속의', '소용돌이', '잠 못 드는']
+const NICK_NOUN = ['우주비행사', '혜성', '블랙홀', '성운', '소행성', '안드로메다', '오리온', '우주선', '외계인', '위성', '북극성', '운석', '우주먼지', '토성고리', '달토끼']
+function randomNickname() {
+  const a = NICK_ADJ[Math.floor(Math.random() * NICK_ADJ.length)]
+  const n = NICK_NOUN[Math.floor(Math.random() * NICK_NOUN.length)]
+  const num = Math.floor(Math.random() * 90) + 10
+  return `${a} ${n}${num}`
+}
 
 export default function TitleScreen() {
   const { joinRoom, connected } = useGame()
@@ -12,6 +22,18 @@ export default function TitleScreen() {
   const [selectedAvatar] = useState(AVATARS[Math.floor(Math.random() * AVATARS.length)])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // ★ 공유 링크(?room=코드)로 들어오면 자동으로 '참가' 모드 + 코드 채우기
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('room')
+    if (code) {
+      setMode('join')
+      setRoomCode(code.toUpperCase().slice(0, 4))
+    }
+  }, [])
+
+  const pickRandomNickname = () => { setNickname(randomNickname()); setError('') }
 
   const handleStart = () => {
     const trimmed = nickname.trim()
@@ -83,15 +105,36 @@ export default function TitleScreen() {
 
             <div className="input-group">
               <label>닉네임</label>
-              <input
-                className="input"
-                placeholder="우주 탐험가..."
-                value={nickname}
-                onChange={e => { setNickname(e.target.value); setError('') }}
-                onKeyDown={handleKey}
-                maxLength={16}
-                autoFocus
-              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="input"
+                  style={{ flex: 1 }}
+                  placeholder="우주 탐험가..."
+                  value={nickname}
+                  onChange={e => { setNickname(e.target.value); setError('') }}
+                  onKeyDown={handleKey}
+                  maxLength={16}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={pickRandomNickname}
+                  title="랜덤 닉네임 생성"
+                  aria-label="랜덤 닉네임 생성"
+                  style={{
+                    flexShrink: 0,
+                    width: 48,
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: 'rgba(124,58,237,0.18)',
+                    color: 'var(--text-primary)',
+                    fontSize: '1.3rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🔄
+                </button>
+              </div>
             </div>
 
             {mode === 'join' && (
