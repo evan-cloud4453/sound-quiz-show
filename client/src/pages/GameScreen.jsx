@@ -113,13 +113,16 @@ export default function GameScreen() {
   const { emit, on }            = useSocket()
 
   const {
-    players, myId, nickname,
+    players, myId, nickname, hostId,
     currentRound, totalRounds,
     category, hint,
     youtubeId, youtubeStart, youtubeEnd,
     roundActive, lastResult, targetScore,
     timeLimit: serverTimeLimit
   } = state
+
+  const me = players?.find(p => p.id === myId)
+  const isHost = !!(me?.isHost || (hostId && myId === hostId))
 
   const [soundUnlocked, setSoundUnlocked] = useState(false)
   const [isPlaying,     setIsPlaying]     = useState(false)
@@ -133,6 +136,7 @@ export default function GameScreen() {
   const [showResult,    setShowResult]    = useState(false)
   const [playbackError, setPlaybackError] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false) // ★ 뒤로가기 방지 모달
+  const [openingPhase,  setOpeningPhase]  = useState(false)       // ★ 오프닝 안내방송 재생 중 여부
 
   const inputRef           = useRef(null)
   const playerRef          = useRef(null)
@@ -141,6 +145,7 @@ export default function GameScreen() {
   const hostElemId         = useRef(`yt-${Math.random().toString(36).slice(2)}`)
   const seqAbortRef        = useRef(null)
   const openingDoneRef     = useRef(false)
+  const skipOpeningRef     = useRef(null)   // ★ 호출하면 오프닝만 즉시 종료
   const musicEndResolveRef = useRef(null)
   const tickRef            = useRef(null)
   const musicStartedRef    = useRef(false)
@@ -251,7 +256,17 @@ export default function GameScreen() {
     return unsub
   }, [on])
 
-  // 음악 재생 Promise
+  // ★ skip_opening 수신 — 방장이 누르면 서버가 전원에게 브로드캐스트 → 모두 동시에 오프닝 스킵
+  useEffect(() => {
+    const unsub = on('skip_opening', () => {
+      skipOpeningRef.current?.()
+    })
+    return unsub
+  }, [on])
+
+  const handleSkipOpening = useCallback(() => {
+    emit('skip_opening') // 서버가 host 여부 검증 후 전원에게 재전송
+  }, [emit])
   function playMusic(videoId, startSec, endSec, signal) {
     return new Promise((resolve) => {
       if (signal?.aborted) { resolve(); return }
@@ -362,19 +377,32 @@ export default function GameScreen() {
     async function runSequence() {
       const ctx = getAudioCtx()
     
-      // 1. 오프닝 (1회)
+      // 1. 오프닝 (1회) — 방장이 스킵하면 오프닝만 중단하고 다음 단계로 진행
       if (!openingDoneRef.current) {
         openingDoneRef.current = true
         setPhaseLabel('🎙️ 오프닝 안내 방송 중...')
         if (ctx?.state === 'suspended') await ctx.resume()
-    
-        // 팡파레 + 오프닝 MP3 순서대로
+
+        // 오프닝 전용 중단 컨트롤러: 스킵 버튼/이벤트가 이걸 abort한다.
+        // (전체 라운드를 멈추는 sig와 분리 → 스킵해도 주제/음악 단계는 그대로 진행)
+        const openingAc = new AbortController()
+        const onMainAbort = () => openingAc.abort()
+        sig.addEventListener('abort', onMainAbort)
+        skipOpeningRef.current = () => openingAc.abort()
+        setOpeningPhase(true)
+
         await delay(700)
-        if (sig.aborted) return
-    
-        await playAudioFile(OPENING_AUDIO, sig)  // opening.mp3 길이만큼 대기
-        if (sig.aborted) return
-        await delay(500)
+        if (!sig.aborted && !openingAc.signal.aborted) {
+          await playAudioFile(OPENING_AUDIO, openingAc.signal)  // opening.mp3 (스킵 가능)
+        }
+
+        // 오프닝 단계 정리
+        setOpeningPhase(false)
+        skipOpeningRef.current = null
+        sig.removeEventListener('abort', onMainAbort)
+
+        if (sig.aborted) return       // 전체 라운드가 중단된 경우만 종료
+        await delay(openingAc.signal.aborted ? 150 : 500) // 스킵 시 살짝만 텀
         if (sig.aborted) return
       }
     
@@ -642,6 +670,23 @@ export default function GameScreen() {
                 </div>
               )}
               <div className="phase-label">{phaseLabel}</div>
+              {isHost && openingPhase && (
+                <button
+                  onClick={handleSkipOpening}
+                  style={{
+                    marginTop: 10,
+                    padding: '8px 18px',
+                    borderRadius: 999,
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    background: 'rgba(255,255,255,0.08)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.85rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ⏭️ 안내방송 건너뛰기 (방장)
+                </button>
+              )}
             </div>
           </div>
 
