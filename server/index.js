@@ -242,6 +242,12 @@ io.on('connection', (socket) => {
       if (room.hostId !== socket.id) return cb?.({ error: '방장만 게임을 시작할 수 있습니다.' });
       if (room.status === 'PLAYING') return cb?.({ error: '이미 게임 중입니다.' });
 
+      // ★ 모든 (방장 외) 플레이어가 준비완료여야 시작 가능
+      const others = room.players.filter(p => p.id !== room.hostId);
+      if (!others.every(p => p.isReady)) {
+        return cb?.({ error: '아직 준비하지 않은 플레이어가 있습니다.' });
+      }
+
       const count = Math.max(1, Math.min(Number(roundCount) || ROUND_COUNT, 30));
       const questions = getRandomQuestions(count, categories);
       if (questions.length === 0)    return cb?.({ error: '선택한 주제에 출제 가능한 문제가 없습니다.' });
@@ -255,7 +261,8 @@ io.on('connection', (socket) => {
       room.totalRounds        = questions.length;
       room.players.forEach(p => { 
         p.score = 0; 
-        p.isAudioUnlocked = false; // ★ 추가: 게임 시작 시 터치 상태 초기화
+        p.isReady = false;         // ★ 다음 대기방을 위해 준비상태 초기화
+        p.isAudioUnlocked = false; // ★ 게임 시작 시 터치 상태 초기화
       });
 
       io.to(room.code).emit('room_update', getRoomState(room));
@@ -403,6 +410,50 @@ io.on('connection', (socket) => {
       });
     } catch (e) {
       console.error('chat_message 오류:', e);
+    }
+  });
+
+  // ── 준비완료 토글 (모든 플레이어) ─────────────────────────────
+  socket.on('toggle_ready', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.status !== 'WAITING') return;
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player) return;
+      player.isReady = !player.isReady;
+      io.to(room.code).emit('room_update', getRoomState(room));
+    } catch (e) {
+      console.error('toggle_ready 오류:', e);
+    }
+  });
+
+  // ── 방장 위임 (현재 방장만) ───────────────────────────────────
+  socket.on('transfer_host', ({ targetId } = {}) => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.hostId !== socket.id) return; // 현재 방장만
+      const target = room.players.find(p => p.id === targetId);
+      if (!target) return;
+      room.hostId = targetId;
+      io.to(room.code).emit('room_update', getRoomState(room));
+      io.to(room.code).emit('system_message', { text: `👑 ${target.nickname}님이 새 방장이 되었습니다.` });
+    } catch (e) {
+      console.error('transfer_host 오류:', e);
+    }
+  });
+
+  // ── 방 설정 실시간 공유 (방장만) ──────────────────────────────
+  // 방장이 설정창에서 값을 바꾸면 즉시 방 전체에 반영 → 다른 유저도 목표점수/라운드 수 확인 가능
+  socket.on('update_settings', ({ targetScore, roundCount, categories } = {}) => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.hostId !== socket.id || room.status !== 'WAITING') return;
+      if (targetScore != null) room.targetScore = Number(targetScore) || room.targetScore;
+      if (roundCount  != null) room.roundCount  = Math.max(1, Math.min(Number(roundCount) || room.roundCount, 30));
+      if (Array.isArray(categories)) room.selectedCategories = categories;
+      io.to(room.code).emit('room_update', getRoomState(room));
+    } catch (e) {
+      console.error('update_settings 오류:', e);
     }
   });
 
