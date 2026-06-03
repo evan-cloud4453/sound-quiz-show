@@ -87,7 +87,9 @@ const CATEGORY_AUDIO = {
   '언어': '/sounds/categories/언어.mp3',
   '춤의종류': '/sounds/categories/춤의종류.mp3'
 };
-const OPENING_AUDIO = '/sounds/opening.mp3'
+const OPENING_AUDIO = '/sounds/opening.mp3'          // (구버전 호환용, 미사용 가능)
+const INTRO_AUDIO   = '/sounds/opening_intro.mp3'    // 설명 소리 (스킵 대상)
+const GO_AUDIO      = '/sounds/opening_go.mp3'       // 시작 소리 "자, 이제 게임을 시작합니다" (항상 재생)
 
 function playAudioFile(src, signal) {
   return new Promise((resolve) => {
@@ -118,7 +120,8 @@ export default function GameScreen() {
     category, hint,
     youtubeId, youtubeStart, youtubeEnd,
     roundActive, lastResult, targetScore,
-    timeLimit: serverTimeLimit
+    timeLimit: serverTimeLimit,
+    autoSkipOpening
   } = state
 
   const me = players?.find(p => p.id === myId)
@@ -145,13 +148,16 @@ export default function GameScreen() {
   const hostElemId         = useRef(`yt-${Math.random().toString(36).slice(2)}`)
   const seqAbortRef        = useRef(null)
   const openingDoneRef     = useRef(false)
-  const skipOpeningRef     = useRef(null)   // ★ 호출하면 오프닝만 즉시 종료
+  const skipOpeningRef     = useRef(null)   // ★ 호출하면 오프닝(INTRO)만 즉시 종료
+  const autoSkipRef        = useRef(false)  // ★ 재시작 시 INTRO 자동 스킵 여부
   const musicEndResolveRef = useRef(null)
   const tickRef            = useRef(null)
   const musicStartedRef    = useRef(false)
 
   const categoryRef = useRef(category)
   useEffect(() => { categoryRef.current = category }, [category])
+
+  useEffect(() => { autoSkipRef.current = !!autoSkipOpening }, [autoSkipOpening])
   
   const targetScoreRef = useRef(targetScore)
   useEffect(() => { targetScoreRef.current = targetScore }, [targetScore])
@@ -377,32 +383,38 @@ export default function GameScreen() {
     async function runSequence() {
       const ctx = getAudioCtx()
     
-      // 1. 오프닝 (1회) — 방장이 스킵하면 오프닝만 중단하고 다음 단계로 진행
+      // 1. 오프닝 (1회): 설명(INTRO, 스킵 가능) → 시작소리(GO, 항상 재생)
+      //    - 스킵 버튼/이벤트는 INTRO만 끊고 곧장 GO로 넘어간다 → 모두가 시작을 인지
+      //    - 재시작(rematch)이면 INTRO를 자동 스킵하고 바로 GO부터
       if (!openingDoneRef.current) {
         openingDoneRef.current = true
-        setPhaseLabel('🎙️ 오프닝 안내 방송 중...')
         if (ctx?.state === 'suspended') await ctx.resume()
 
-        // 오프닝 전용 중단 컨트롤러: 스킵 버튼/이벤트가 이걸 abort한다.
-        // (전체 라운드를 멈추는 sig와 분리 → 스킵해도 주제/음악 단계는 그대로 진행)
-        const openingAc = new AbortController()
-        const onMainAbort = () => openingAc.abort()
+        // INTRO 전용 중단 컨트롤러 (sig와 분리 → 스킵해도 GO/주제/음악은 진행)
+        const introAc = new AbortController()
+        const onMainAbort = () => introAc.abort()
         sig.addEventListener('abort', onMainAbort)
-        skipOpeningRef.current = () => openingAc.abort()
-        setOpeningPhase(true)
+        skipOpeningRef.current = () => introAc.abort()
 
-        await delay(700)
-        if (!sig.aborted && !openingAc.signal.aborted) {
-          await playAudioFile(OPENING_AUDIO, openingAc.signal)  // opening.mp3 (스킵 가능)
+        const autoSkip = autoSkipRef.current  // 재시작이면 true → INTRO 생략
+        if (!autoSkip) {
+          setOpeningPhase(true)               // 스킵 버튼 노출 (INTRO 동안만)
+          setPhaseLabel('🎙️ 게임 설명 중...')
+          await delay(500)
+          if (!sig.aborted && !introAc.signal.aborted) {
+            await playAudioFile(INTRO_AUDIO, introAc.signal)
+          }
+          setOpeningPhase(false)
         }
-
-        // 오프닝 단계 정리
-        setOpeningPhase(false)
         skipOpeningRef.current = null
         sig.removeEventListener('abort', onMainAbort)
+        if (sig.aborted) return
 
-        if (sig.aborted) return       // 전체 라운드가 중단된 경우만 종료
-        await delay(openingAc.signal.aborted ? 150 : 500) // 스킵 시 살짝만 텀
+        // GO(시작 소리)는 스킵과 무관하게 항상 재생 (라운드 전체 중단 시에만 멈춤)
+        setPhaseLabel('🚀 자, 이제 게임을 시작합니다!')
+        await playAudioFile(GO_AUDIO, sig)
+        if (sig.aborted) return
+        await delay(300)
         if (sig.aborted) return
       }
     
@@ -684,7 +696,7 @@ export default function GameScreen() {
                     cursor: 'pointer'
                   }}
                 >
-                  ⏭️ 안내방송 건너뛰기 (방장)
+                  ⏭️ 설명 건너뛰고 시작 (방장)
                 </button>
               )}
             </div>
