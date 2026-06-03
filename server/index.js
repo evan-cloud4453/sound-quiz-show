@@ -235,7 +235,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('start_game', ({ targetScore = 5, roundCount = ROUND_COUNT, categories = [] } = {}, cb) => {
+  socket.on('start_game', ({ targetScore = 5, roundCount = ROUND_COUNT, categories = [], autoSkipOpening = false } = {}, cb) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room)                     return cb?.({ error: '방을 찾을 수 없습니다.' });
@@ -268,7 +268,8 @@ io.on('connection', (socket) => {
       io.to(room.code).emit('room_update', getRoomState(room));
       io.to(room.code).emit('game_started', {
         totalRounds: room.questions.length,
-        targetScore: room.targetScore
+        targetScore: room.targetScore,
+        autoSkipOpening: !!autoSkipOpening   // ★ 재시작이면 클라이언트가 INTRO 자동 스킵
       });
 
       cb?.({ success: true });
