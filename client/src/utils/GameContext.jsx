@@ -147,7 +147,7 @@ function reducer(state, action) {
 
 export function GameProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
-  const { emit, on, connected, socketId } = useSocket()
+  const { emit, on, connected } = useSocket()
 
   // Listen to socket events
   useEffect(() => {
@@ -167,10 +167,6 @@ export function GameProvider({ children }) {
     ]
     return () => unsubs.forEach(u => u())
   }, [on])
-
-  useEffect(() => {
-    if (socketId) dispatch({ type: 'SET_MY_ID', id: socketId })
-  }, [socketId, connected])
 
   const joinRoom = useCallback((nickname, roomCode) => {
     emit('join_room', { nickname, roomCode: roomCode || undefined }, (res) => {
@@ -230,6 +226,22 @@ export function GameProvider({ children }) {
     emit('return_to_lobby')
   }, [emit])
 
+  // ★ 준비완료 토글 (모든 플레이어)
+  const toggleReady = useCallback(() => {
+    emit('toggle_ready')
+  }, [emit])
+
+  // ★ 방장 위임 (현재 방장만)
+  const transferHost = useCallback((targetId) => {
+    if (!targetId) return
+    emit('transfer_host', { targetId })
+  }, [emit])
+
+  // ★ 방 설정 실시간 공유 (방장만) — 설정창에서 값 변경 시 호출
+  const updateSettings = useCallback((settings) => {
+    emit('update_settings', settings || {})
+  }, [emit])
+
   const backToTitle = useCallback(() => {
     dispatch({ type: 'RESET' })
   }, [])
@@ -239,6 +251,7 @@ export function GameProvider({ children }) {
       state, dispatch,
       joinRoom, startGame, submitAnswer,
       sendChat, returnToLobby, backToTitle,
+      toggleReady, transferHost, updateSettings,
       connected
     }}>
       {children}
