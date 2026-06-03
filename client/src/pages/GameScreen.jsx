@@ -84,7 +84,8 @@ const CATEGORY_AUDIO = {
   '직업': '/sounds/categories/직업.mp3',
   '물건장소': '/sounds/categories/물건장소.mp3',
   '나라': '/sounds/categories/나라.mp3',
-  '언어': '/sounds/categories/언어.mp3'
+  '언어': '/sounds/categories/언어.mp3',
+  '춤의종류': '/sounds/categories/춤의종류.mp3'
 };
 const OPENING_AUDIO = '/sounds/opening.mp3'          // (구버전 호환용, 미사용 가능)
 const INTRO_AUDIO   = '/sounds/opening_intro.mp3'    // 설명 소리 (스킵 대상)
