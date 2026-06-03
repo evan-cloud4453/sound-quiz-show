@@ -11,7 +11,7 @@ function getAvatar(id) {
 }
 
 export default function LobbyScreen() {
-  const { state, startGame, backToTitle, sendChat } = useGame()
+  const { state, startGame, backToTitle, sendChat, toggleReady, transferHost, updateSettings } = useGame()
   const {
     roomCode, players, hostId, myId, nickname,
     availableCategories, chatMessages,
@@ -25,6 +25,7 @@ export default function LobbyScreen() {
   const [showSettings, setShowSettings] = useState(false)
 
   const [copied, setCopied]   = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
   const [starting, setStarting] = useState(false)
 
   // ── 채팅 ──
@@ -44,11 +45,31 @@ export default function LobbyScreen() {
     })
   }
 
+  // ★ 공유 링크 복사: ?room=코드 형태. 링크로 접속하면 참가 모드로 코드 자동 입력됨
+  const shareLink = `${window.location.origin}${window.location.pathname}?room=${roomCode}`
+  const copyLink = () => {
+    navigator.clipboard.writeText(shareLink).then(() => {
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2000)
+    })
+  }
+
+  // ★ 준비 현황: 방장 외 모든 플레이어가 준비되어야 시작 가능
+  const others = players.filter(p => p.id !== hostId)
+  const allReady = others.length === 0 || others.every(p => p.isReady)
+  const iAmReady = !!me?.isReady
+
   const handleStart = async () => {
     if (starting) return
     setStarting(true)
     await startGame({ targetScore, roundCount, categories: selectedCats })
     setStarting(false)
+  }
+
+  // 설정창 닫을 때 서버에 현재 설정을 알려 다른 유저도 보이게 함
+  const closeSettings = () => {
+    updateSettings({ targetScore, roundCount, categories: selectedCats })
+    setShowSettings(false)
   }
 
   const toggleCategory = (cat) => {
@@ -83,10 +104,13 @@ export default function LobbyScreen() {
                 {roomCode}
               </span>
               <button className="copy-btn" onClick={copyCode}>
-                {copied ? '✅ 복사됨' : '📋 복사'}
+                {copied ? '✅ 복사됨' : '📋 코드'}
+              </button>
+              <button className="copy-btn" onClick={copyLink}>
+                {linkCopied ? '✅ 복사됨' : '🔗 링크'}
               </button>
             </div>
-            <p className="room-code-hint">친구에게 이 코드를 알려주세요!</p>
+            <p className="room-code-hint">코드 또는 링크를 친구에게 공유하세요!</p>
           </div>
         </div>
 
@@ -117,8 +141,24 @@ export default function LobbyScreen() {
                     </span>
                     {p.id === hostId && <span className="host-tag">👑 방장</span>}
                   </div>
-                  <div className={`ready-indicator ${p.id === hostId ? 'host' : 'waiting'}`}>
-                    {p.id === hostId ? '방장' : '대기 중'}
+
+                  {/* 방장이면 다른 플레이어에게 위임 버튼 */}
+                  {currentIsHost && p.id !== hostId && (
+                    <button
+                      className="copy-btn"
+                      title="방장 위임"
+                      onClick={() => {
+                        if (window.confirm(`${p.nickname}님에게 방장을 넘기시겠어요?`)) transferHost(p.id)
+                      }}
+                      style={{ marginRight: 6 }}
+                    >
+                      👑 위임
+                    </button>
+                  )}
+
+                  {/* 준비 상태 표시 */}
+                  <div className={`ready-indicator ${p.id === hostId ? 'host' : (p.isReady ? 'host' : 'waiting')}`}>
+                    {p.id === hostId ? '방장' : (p.isReady ? '✅ 준비완료' : '대기 중')}
                   </div>
                 </div>
               ))}
@@ -218,19 +258,38 @@ export default function LobbyScreen() {
                 ⚙️ 게임 설정
               </button>
 
+              {!allReady && (
+                <p style={{ textAlign: 'center', color: 'var(--warn, #f59e0b)', fontSize: '0.82rem', margin: 0 }}>
+                  ⏳ 모든 플레이어가 준비완료해야 시작할 수 있어요.
+                </p>
+              )}
               <button
                 className={`btn btn-primary btn-lg start-btn ${starting ? 'starting' : ''}`}
                 onClick={handleStart}
-                disabled={starting || players.length < 1}
+                disabled={starting || players.length < 1 || !allReady}
               >
                 {starting ? '🚀 게임 시작 중...' : `🚀 게임 시작! (${players.length}명)`}
               </button>
             </div>
           ) : (
-            <div className="glass-panel waiting-panel animate-fadeInUp" style={{ animationDelay: '0.3s' }}>
-              <div className="waiting-icon">🛸</div>
-              <p className="waiting-text">방장이 설정을 마치고<br />게임을 시작할 때까지 기다려주세요!</p>
-              <div className="waiting-dots"><span /><span /><span /></div>
+            <div className="animate-fadeInUp" style={{ display: 'flex', flexDirection: 'column', gap: 12, animationDelay: '0.3s' }}>
+              {/* 방장이 아닌 유저도 방 설정 확인 (주제는 제외) */}
+              <div className="setting-info" style={{ justifyContent: 'center' }}>
+                <div className="info-chip">🏆 목표 {targetScore}점</div>
+                <div className="info-chip">🎵 {roundCount}라운드</div>
+                <div className="info-chip">⏱️ 라운드당 15초</div>
+              </div>
+
+              <button
+                className={`btn btn-lg ${iAmReady ? 'btn-secondary' : 'btn-primary'}`}
+                onClick={toggleReady}
+              >
+                {iAmReady ? '✅ 준비완료 (취소하려면 누르세요)' : '🙋 준비완료'}
+              </button>
+
+              <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.82rem', margin: 0 }}>
+                {iAmReady ? '방장이 게임을 시작하길 기다리는 중...' : '준비되면 위 버튼을 눌러주세요!'}
+              </p>
             </div>
           )}
         </div>
@@ -239,7 +298,7 @@ export default function LobbyScreen() {
       {/* ★ 설정 모달 (방장 전용) */}
       {showSettings && currentIsHost && (
         <div
-          onClick={() => setShowSettings(false)}
+          onClick={closeSettings}
           style={{
             position: 'fixed', inset: 0, zIndex: 1000,
             background: 'rgba(4,5,15,0.7)', backdropFilter: 'blur(8px)',
@@ -253,7 +312,7 @@ export default function LobbyScreen() {
           >
             <div className="panel-title" style={{ marginBottom: 16 }}>
               <span>⚙️ 게임 설정</span>
-              <button className="copy-btn" onClick={() => setShowSettings(false)}>✕ 닫기</button>
+              <button className="copy-btn" onClick={closeSettings}>✕ 닫기</button>
             </div>
 
             {/* 목표 점수 */}
@@ -370,7 +429,7 @@ export default function LobbyScreen() {
 
             <button
               className="btn btn-primary btn-lg w-full"
-              onClick={() => setShowSettings(false)}
+              onClick={closeSettings}
               style={{ marginTop: 16 }}
             >
               ✅ 설정 완료
