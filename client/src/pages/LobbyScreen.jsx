@@ -97,17 +97,19 @@ export default function LobbyScreen() {
         {/* Header */}
         <div className="lobby-header animate-fadeInUp">
           <button className="back-btn-sm" onClick={backToTitle}>← 나가기</button>
-          <div className="room-code-display">
+          <div className="room-code-display" style={{ textAlign: 'center' }}>
             <span className="room-code-label">방 코드</span>
-            <div className="room-code-value">
+            <div className="room-code-value" style={{ justifyContent: 'center' }}>
               <span className="glow-cyan" style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', letterSpacing: '0.2em' }}>
                 {roomCode}
               </span>
-              <button className="copy-btn" onClick={copyCode}>
-                {copied ? '✅ 복사됨' : '📋 코드'}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 8 }}>
+              <button className="copy-btn" style={{ fontSize: '0.75rem', padding: '5px 12px' }} onClick={copyCode}>
+                {copied ? '✅ 복사됨' : '📋 코드 복사'}
               </button>
-              <button className="copy-btn" onClick={copyLink}>
-                {linkCopied ? '✅ 복사됨' : '🔗 링크'}
+              <button className="copy-btn" style={{ fontSize: '0.75rem', padding: '5px 12px' }} onClick={copyLink}>
+                {linkCopied ? '✅ 복사됨' : '🔗 링크 복사'}
               </button>
             </div>
             <p className="room-code-hint">코드 또는 링크를 친구에게 공유하세요!</p>
@@ -115,20 +117,22 @@ export default function LobbyScreen() {
         </div>
 
         <div className="lobby-body">
-          {/* ★ 게임 정보 + 설정 (플레이어 목록 위로 이동) */}
-          <div className="glass-panel animate-fadeInUp" style={{ animationDelay: '0.05s', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div className="setting-info" style={{ justifyContent: 'center' }}>
-              <div className="info-chip">🏆 목표 {targetScore}점</div>
-              <div className="info-chip">🎵 {roundCount}라운드</div>
-              {currentIsHost && <div className="info-chip">📚 {catSummary}</div>}
-              <div className="info-chip">⏱️ 라운드당 15초</div>
-            </div>
-            {currentIsHost && (
-              <button className="btn btn-secondary" onClick={() => setShowSettings(true)}>
-                ⚙️ 게임 설정
-              </button>
-            )}
+          {/* ★ 게임 정보 요약 (박스 없이) + 설정 버튼 */}
+          <div className="setting-info animate-fadeInUp" style={{ justifyContent: 'center', animationDelay: '0.05s' }}>
+            <div className="info-chip">🏆 목표 {targetScore}점</div>
+            <div className="info-chip">🎵 {roundCount}라운드</div>
+            {currentIsHost && <div className="info-chip">📚 {catSummary}</div>}
+            <div className="info-chip">⏱️ 라운드당 15초</div>
           </div>
+          {currentIsHost && (
+            <button
+              className="btn btn-secondary animate-fadeInUp"
+              style={{ animationDelay: '0.08s' }}
+              onClick={() => setShowSettings(true)}
+            >
+              ⚙️ 게임 설정
+            </button>
+          )}
 
           {/* Players list */}
           <div className="glass-panel players-panel animate-fadeInUp" style={{ animationDelay: '0.1s' }}>
