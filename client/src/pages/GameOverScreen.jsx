@@ -16,7 +16,9 @@ export default function GameOverScreen() {
     winner, isDraw, drawPlayers, finalScores, myId, nickname, roomCode,
     targetScore, roundCount, selectedCategories, hostId
   } = state
-  const isHost = state.isHost || myId === hostId
+  // ★ 방장 판별은 서버가 실시간 갱신하는 hostId 만 사용.
+  //   (state.isHost 는 방 생성 시 1회만 정해져 위임 후에도 안 바뀌므로 쓰면 안 됨)
+  const isHost = !!myId && myId === hostId
   const [showConfetti, setShowConfetti] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [returning, setReturning] = useState(false)
