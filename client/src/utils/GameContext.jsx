@@ -22,6 +22,9 @@ const initialState = {
   // ★ 채팅
   chatMessages: [],          // { id, playerId, nickname, text, ts }
 
+  // ★ 오프닝 자동 스킵 (재시작 시 true)
+  autoSkipOpening: false,
+
   // round state
   currentRound: 0,
   totalRounds: 10,
@@ -96,6 +99,7 @@ function reducer(state, action) {
         screen: 'game',
         totalRounds: action.data.totalRounds,
         targetScore: action.data.targetScore,
+        autoSkipOpening: !!action.data.autoSkipOpening,
         lastResult: null,
         winner: null
       }
@@ -192,7 +196,8 @@ export function GameProvider({ children }) {
     const payload = {
       targetScore: cfg.targetScore ?? 5,
       roundCount:  cfg.roundCount  ?? 10,
-      categories:  cfg.categories  ?? []
+      categories:  cfg.categories  ?? [],
+      autoSkipOpening: !!cfg.autoSkipOpening   // ★ 재시작이면 true
     }
     dispatch({ type: 'SET_GAME_CONFIG', config: payload })
 
