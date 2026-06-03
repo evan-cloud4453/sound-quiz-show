@@ -1,740 +1,556 @@
-// client/src/pages/GameScreen.jsx — v4
-// 수정:
-//   1. speakSafe: cancel() 후 150ms 대기 → TTS 묵음 버그 수정
-//   2. timer_start 리스너를 GameContext 없이 직접 소켓에서 수신
-//   3. isTimerRunning 의존 제거, timerActive만 사용
-//   4. window.utterances 누수 방지 (최대 5개 유지)
+// sever/index.js
 
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { useGame } from '../utils/GameContext'
-import { useSocket } from '../hooks/useSocket'
-import WaveformVisualizer from '../components/WaveformVisualizer'
-import TimerRing from '../components/TimerRing'
-import './GameScreen.css'
+require('dotenv').config();
+const express = require('express');
+const http = require('http');
+const https = require('https');
+const { Server } = require('socket.io');
+const cors = require('cors');
 
-const YT_STATE = { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3 }
-const AVATARS  = ['🚀','⭐','🌙','💫','🪐','☄️','🌟','🎵','👾','🛸','🌌','🔭']
-function getAvatar(id) {
-  return AVATARS[(id?.charCodeAt(id.length - 1) || 0) % AVATARS.length]
-}
+const app    = express();
+const server = http.createServer(app);
 
-// ─── YouTube API 싱글톤 ───────────────────────────────────────
-let ytApiPromise = null
-function loadYouTubeApi() {
-  if (window.YT?.Player) return Promise.resolve(window.YT)
-  if (ytApiPromise) return ytApiPromise
-  ytApiPromise = new Promise((resolve, reject) => {
-    window.onYouTubeIframeAPIReady = () => resolve(window.YT)
-    const s = document.createElement('script')
-    s.src = 'https://www.youtube.com/iframe_api'
-    s.onerror = () => reject(new Error('YouTube API 로드 실패'))
-    document.head.appendChild(s)
-  })
-  return ytApiPromise
-}
+const CLIENT_URL       = process.env.CLIENT_URL || 'http://localhost:5173';
+const ROUND_COUNT      = 10;
+const ROUND_TIME_LIMIT = 15; // music_started 수신 후 정답 입력 시간 (초)
 
-// ─── 팡파레 ──────────────────────────────────────────────────
-function playFanfare(ctx) {
-  const t = ctx.currentTime
-  const note = (freq, offset) => {
-    const osc = ctx.createOscillator()
-    const g   = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.value = freq
-    g.gain.setValueAtTime(0.2, t + offset)
-    g.gain.exponentialRampToValueAtTime(0.01, t + offset + 0.15)
-    osc.connect(g); g.connect(ctx.destination)
-    osc.start(t + offset); osc.stop(t + offset + 0.2)
+const io = new Server(server, {
+  cors: {
+    origin: [CLIENT_URL, /\.vercel\.app$/, /\.netlify\.app$/],
+    methods: ['GET', 'POST'],
+    credentials: true
   }
-  note(523.25, 0); note(659.25, 0.1); note(783.99, 0.2); note(1046.50, 0.3)
-  return 700
-}
+});
 
-// ─── 틱 소리 ─────────────────────────────────────────────────
-function playTick(ctx) {
-  const osc = ctx.createOscillator()
-  const g   = ctx.createGain()
-  osc.type = 'sine'; osc.frequency.value = 850
-  g.gain.setValueAtTime(0.15, ctx.currentTime)
-  g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
-  osc.connect(g); g.connect(ctx.destination)
-  osc.start(); osc.stop(ctx.currentTime + 0.06)
-}
+app.use(cors({ origin: CLIENT_URL }));
+app.use(express.json());
+app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.get('/',       (_, res) => res.json({ name: 'Sound Quiz Show Server', version: '1.0.0' }));
 
-// ─── ★ 수정된 TTS 함수 ────────────────────────────────────────
-// 핵심: cancel() 후 반드시 150ms 대기 후 speak()
-// 이전 utterance 참조 유지 (GC 방지), 최대 5개로 제한
-const CATEGORY_AUDIO = {
-  '드라마': '/sounds/categories/드라마.mp3',
-  '가요': '/sounds/categories/가요.mp3',
-  '팝송': '/sounds/categories/팝송.mp3',
-  '영화': '/sounds/categories/영화.mp3',
-  '애니메이션': '/sounds/categories/애니메이션.mp3',
-  '동요': '/sounds/categories/동요.mp3',
-  '클래식음악': '/sounds/categories/클래식음악.mp3',
-  '작곡가': '/sounds/categories/작곡가.mp3',
-  '공연예술': '/sounds/categories/공연 예술.mp3', // 실제 파일명에 공백이 있어 경로도 공백 유지
-  '스포츠': '/sounds/categories/스포츠.mp3',
-  '운송수단': '/sounds/categories/운송수단.mp3',
-  '악기': '/sounds/categories/악기.mp3',
-  '동물': '/sounds/categories/동물.mp3',
-  '계절': '/sounds/categories/계절.mp3',
-  '자연현상': '/sounds/categories/자연현상.mp3',
-  '불쾌한소리': '/sounds/categories/불쾌한소리.mp3',
-  '직업': '/sounds/categories/직업.mp3',
-  '물건장소': '/sounds/categories/물건장소.mp3',
-  '나라': '/sounds/categories/나라.mp3',
-  '언어': '/sounds/categories/언어.mp3',
-  '춤의종류': '/sounds/categories/춤의종류.mp3'
-};
-const OPENING_AUDIO = '/sounds/opening.mp3'
+// ── 퀴즈 데이터 ───────────────────────────────────────────────
+const { RAW_QUIZ_DATA } = require('./quizData');
 
-function playAudioFile(src, signal) {
+const QUIZ_DATA = RAW_QUIZ_DATA.map(q => ({
+  ...q,
+  youtubeId:    q.youtubeId    || null,
+  youtubeStart: Number(q.youtubeStart ?? q.start ?? 0),
+  youtubeEnd:   Number(q.youtubeEnd   ?? q.end   ?? 0)
+}));
+
+let VALIDATED_QUIZ_DATA = [];
+
+// 설정창에서 고를 수 있는 주제 목록 (원본 데이터 기준, 항상 사용 가능)
+const ALL_CATEGORIES = [...new Set(QUIZ_DATA.map(q => q.category))];
+
+function checkYouTubeValid(youtubeId) {
   return new Promise((resolve) => {
-    if (signal?.aborted) { resolve(); return }
-    const audio = new Audio(src)
-    audio.volume = 1.0
-    let done = false
-    const finish = () => { if (!done) { done = true; resolve() } }
-    audio.onended = finish
-    audio.onerror = () => { console.warn(`[오디오 재생 실패] ${src}`); finish() }  // 파일 없으면 그냥 넘어감
-    signal?.addEventListener('abort', () => { audio.pause(); finish() })
-    audio.play().catch(finish)
+    const url = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}`;
+    https.get(url, (res) => resolve(res.statusCode === 200))
+         .on('error', () => resolve(false));
+  });
+}
+
+async function preCheckQuestions() {
+  console.log('🔍 유튜브 링크 유효성 검사 중...');
+  const base    = QUIZ_DATA.filter(q => q.youtubeId && q.youtubeId.length >= 10);
+  const results = await Promise.all(
+    base.map(async q => {
+      const ok = await checkYouTubeValid(q.youtubeId);
+      if (!ok) console.log(`❌ 제외: ${q.youtubeId} (${q.answers[0]})`);
+      return ok ? q : null;
+    })
+  );
+  VALIDATED_QUIZ_DATA = results.filter(Boolean);
+  console.log(`✅ 유효 문제 ${VALIDATED_QUIZ_DATA.length}개 준비 완료`);
+}
+
+preCheckQuestions();
+
+// ── 유틸 ─────────────────────────────────────────────────────
+const rooms = new Map();
+
+function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function getRandomQuestions(count = 10, categories = []) {
+  // 선택한 주제만 필터링. 선택이 없거나 결과가 0개면 전체에서 출제.
+  let pool = VALIDATED_QUIZ_DATA;
+  if (Array.isArray(categories) && categories.length > 0) {
+    const set = new Set(categories);
+    const filtered = VALIDATED_QUIZ_DATA.filter(q => set.has(q.category));
+    if (filtered.length > 0) pool = filtered;
+  }
+  return [...pool]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, Math.min(count, pool.length));
+}
+
+function normalise(text) {
+  return text.toLowerCase().replace(/[\s\-_.,!?'"]/g, '').trim();
+}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
+}
+
+function smartGrade(submitted, answers) {
+  const ns = normalise(submitted);
+  if (!ns) return false;
+  for (const ans of answers) {
+    const na = normalise(ans);
+    if (ns === na) return true;
+    if (na.length >= 3) {
+      const dist = levenshtein(ns, na);
+      const sim  = 1 - dist / Math.max(na.length, ns.length);
+      if (sim >= 0.8 || dist === 1) return true;
+    }
+  }
+  return false;
+}
+
+function getRoomState(room) {
+  return {
+    roomCode:      room.code,
+    hostId:        room.hostId,
+    players:       room.players.map(p => ({
+      id: p.id, nickname: p.nickname,
+      score: p.score, isReady: p.isReady,
+      isHost: p.id === room.hostId
+    })),
+    status:        room.status,
+    currentRound:  room.currentRound,
+    totalRounds:   room.totalRounds,
+    targetScore:   room.targetScore,
+    roundCount:    room.roundCount,
+    selectedCategories: room.selectedCategories || [],
+    categories:    ALL_CATEGORIES, // 설정창용 주제 목록
+    isTimerRunning: !!room.roundTimer // 💡 프론트엔드 타이머 애니메이션 트리거
+  };
+}
+
+// ── 타이머 헬퍼 ───────────────────────────────────────────────
+function clearRoomTimers(room) {
+  clearTimeout(room.roundTimer);
+  clearTimeout(room.fallbackTimer);
+  room.roundTimer    = null;
+  room.fallbackTimer = null;
+}
+
+function startRoundTimer(room) {
+  if (room.roundTimer) return;
+
+  clearTimeout(room.fallbackTimer);
+  room.fallbackTimer = null;
+
+  const question = room.questions[room.currentRound - 1];
+
+  room.roundTimer = setTimeout(() => {
+    room.roundTimer = null;
+    if (room.answeredThisRound) return;
+    room.answeredThisRound = true;
+
+    io.to(room.code).emit('answer_result', {
+      correct:  false,
+      noWinner: true,
+      answer:   question?.answers?.[0] || '알 수 없음',
+      message:  '시간 초과! 아무도 맞추지 못했습니다.',
+      scores:   room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+    });
+
+    setTimeout(() => checkEndOrNextRound(room), 2500);
+  }, ROUND_TIME_LIMIT * 1000);
+
+  io.to(room.code).emit('timer_start', { timeLimit: ROUND_TIME_LIMIT });
+  io.to(room.code).emit('room_update', getRoomState(room)); // 💡 타이머 시작 즉시 상태 갱신
+  console.log(`[타이머 시작] 방 ${room.code} 라운드 ${room.currentRound} — ${ROUND_TIME_LIMIT}초`);
+}
+
+// ── 소켓 이벤트 ───────────────────────────────────────────────
+io.on('connection', (socket) => {
+  console.log(`[접속] ${socket.id}`);
+
+  socket.on('join_room', ({ nickname, roomCode }, cb) => {
+    try {
+      let room;
+      let isNewRoom = false;
+
+      if (roomCode) {
+        room = rooms.get(roomCode.toUpperCase());
+        if (!room)                      return cb({ error: '존재하지 않는 방 코드입니다.' });
+        if (room.status === 'PLAYING')  return cb({ error: '이미 게임이 진행 중입니다.' });
+        if (room.players.length >= 8)   return cb({ error: '방이 가득 찼습니다. (최대 8명)' });
+      } else {
+        let code;
+        do { code = generateRoomCode(); } while (rooms.has(code));
+        room = {
+          code,
+          hostId:               socket.id,
+          players:              [],
+          status:               'WAITING',
+          currentRound:         0,
+          totalRounds:          ROUND_COUNT,
+          targetScore:          5,
+          roundCount:           ROUND_COUNT,
+          selectedCategories:   [],
+          questions:            [],
+          roundTimer:           null,
+          fallbackTimer:        null,
+          answeredThisRound:    false,
+          firstCorrectPlayerId: null,
+          musicStartedSockets:  new Set()
+        };
+        rooms.set(code, room);
+        isNewRoom = true;
+      }
+
+      room.players.push({
+        id: socket.id,
+        nickname: nickname || `플레이어${room.players.length + 1}`,
+        score: 0, isReady: false,
+        isAudioUnlocked: false
+      });
+
+      socket.join(room.code);
+      socket.data.roomCode = room.code;
+      socket.data.nickname = nickname;
+
+      io.to(room.code).emit('room_update', getRoomState(room));
+      cb({ success: true, roomCode: room.code, isHost: isNewRoom });
+    } catch (e) {
+      console.error(e);
+      cb({ error: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  socket.on('start_game', ({ targetScore = 5, roundCount = ROUND_COUNT, categories = [] } = {}, cb) => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room)                     return cb?.({ error: '방을 찾을 수 없습니다.' });
+      if (room.hostId !== socket.id) return cb?.({ error: '방장만 게임을 시작할 수 있습니다.' });
+      if (room.status === 'PLAYING') return cb?.({ error: '이미 게임 중입니다.' });
+
+      const count = Math.max(1, Math.min(Number(roundCount) || ROUND_COUNT, 30));
+      const questions = getRandomQuestions(count, categories);
+      if (questions.length === 0)    return cb?.({ error: '선택한 주제에 출제 가능한 문제가 없습니다.' });
+
+      room.status             = 'PLAYING';
+      room.currentRound       = 0;
+      room.targetScore        = Number(targetScore) || 5;
+      room.roundCount         = count;
+      room.selectedCategories = Array.isArray(categories) ? categories : [];
+      room.questions          = questions;
+      room.totalRounds        = questions.length;
+      room.players.forEach(p => { 
+        p.score = 0; 
+        p.isAudioUnlocked = false; // ★ 추가: 게임 시작 시 터치 상태 초기화
+      });
+
+      io.to(room.code).emit('room_update', getRoomState(room));
+      io.to(room.code).emit('game_started', {
+        totalRounds: room.questions.length,
+        targetScore: room.targetScore
+      });
+
+      cb?.({ success: true });
+      
+      // ★ 로버스트 로직: 서버 상태를 동기화 대기(SYNCING)로 변경
+      room.status = 'SYNCING'; 
+      
+      // ★ 타임아웃(10초) 설정: 누군가 튕기거나 안 눌러도 10초 뒤 무조건 강제 시작 (무한 대기 방지)
+      room.syncTimeout = setTimeout(() => {
+        if (room.status === 'SYNCING') {
+          console.log(`[강제 시작] 방 ${room.code} 터치 대기 시간 초과`);
+          room.status = 'PLAYING';
+          startRound(room);
+        }
+      }, 10000);
+
+      cb?.({ success: true });
+      room.waitingForUnlocks = true; // 서버가 플레이어들의 화면 터치를 기다림
+    } catch (e) {
+      console.error(e);
+      cb?.({ error: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  socket.on('ready_to_start', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.status !== 'SYNCING') return; // SYNCING 상태일 때만 유효
+
+      const player = room.players.find(p => p.id === socket.id);
+      if (player) player.isAudioUnlocked = true;
+
+      // 혼자 테스트 중이거나, 모든 인원이 터치를 완료했는지 확인
+      const allUnlocked = room.players.every(p => p.isAudioUnlocked);
+      
+      if (allUnlocked) {
+        clearTimeout(room.syncTimeout); // 타임아웃 캔슬
+        room.status = 'PLAYING';
+        startRound(room); // 서버가 즉시 라운드 시작 신호(round_start)를 모두에게 쏨!
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+
+  socket.on('music_started', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.status !== 'PLAYING') return;
+      if (room.answeredThisRound)             return;
+      if (room.musicStartedSockets.has(socket.id)) return;
+      room.musicStartedSockets.add(socket.id);
+
+      startRoundTimer(room); 
+    } catch (e) {
+      console.error('music_started 오류:', e);
+    }
+  });
+
+  socket.on('submit_answer', ({ answer }) => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.status !== 'PLAYING') return;
+
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player || room.answeredThisRound)  return;
+
+      const question = room.questions[room.currentRound - 1];
+      if (!question) return;
+
+      if (smartGrade(answer, question.answers)) {
+        room.answeredThisRound    = true;
+        room.firstCorrectPlayerId = socket.id;
+        clearRoomTimers(room);
+
+        player.score += 1;
+        io.to(room.code).emit('room_update', getRoomState(room));
+        io.to(room.code).emit('answer_result', {
+          correct:        true,
+          winnerId:       socket.id,
+          winnerNickname: player.nickname,
+          answer:         question.answers[0],
+          scores:         room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+        });
+
+        setTimeout(() => checkEndOrNextRound(room), 2500);
+      } else {
+        socket.emit('answer_result', {
+          correct:  false,
+          playerId: socket.id,
+          message:  '틀렸습니다! 다시 시도해보세요.',
+          winnerId: null, 
+          noWinner: false
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+  socket.on('skip_round', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.status !== 'PLAYING' || room.answeredThisRound) return;
+
+      room.answeredThisRound = true;
+      clearRoomTimers(room);
+
+      const q = room.questions[room.currentRound - 1];
+      io.to(room.code).emit('answer_result', {
+        correct:  false,
+        noWinner: true,
+        answer:   q?.answers?.[0] || '알 수 없음',
+        message:  '영상을 재생할 수 없어 스킵했습니다.',
+        scores:   room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+      });
+
+      setTimeout(() => checkEndOrNextRound(room), 2500);
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+  // ── 채팅 ────────────────────────────────────────────────────
+  socket.on('chat_message', ({ text } = {}) => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) return;
+      const player = room.players.find(p => p.id === socket.id);
+      const clean  = String(text || '').slice(0, 200).trim();
+      if (!clean) return;
+      io.to(room.code).emit('chat_message', {
+        id:       `${socket.id}-${Date.now()}`,
+        playerId: socket.id,
+        nickname: player?.nickname || '익명',
+        text:     clean,
+        ts:       Date.now()
+      });
+    } catch (e) {
+      console.error('chat_message 오류:', e);
+    }
+  });
+
+  // ── 오프닝 안내방송 스킵 (방장만) ─────────────────────────────
+  socket.on('skip_opening', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.hostId !== socket.id) return; // 방장만 허용
+      io.to(room.code).emit('skip_opening'); // 전원 동시 스킵 (요청자 포함)
+    } catch (e) {
+      console.error('skip_opening 오류:', e);
+    }
+  });
+
+  // ── 게임 종료 후 대기방으로 복귀 (방장만) ─────────────────────
+  socket.on('return_to_lobby', () => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.hostId !== socket.id) return;
+
+      clearRoomTimers(room);
+      room.status              = 'WAITING';
+      room.currentRound        = 0;
+      room.questions           = [];
+      room.answeredThisRound   = false;
+      room.firstCorrectPlayerId = null;
+      room.musicStartedSockets = new Set();
+      room.players.forEach(p => { p.score = 0; p.isReady = false; p.isAudioUnlocked = false; });
+
+      io.to(room.code).emit('room_update', getRoomState(room));
+      io.to(room.code).emit('back_to_lobby'); // 모든 클라이언트를 대기방 화면으로
+    } catch (e) {
+      console.error('return_to_lobby 오류:', e);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    const roomCode = socket.data.roomCode;
+    if (!roomCode) return;
+    const room = rooms.get(roomCode);
+    if (!room) return;
+
+    room.players = room.players.filter(p => p.id !== socket.id);
+    room.musicStartedSockets?.delete(socket.id);
+
+    if (room.players.length === 0) {
+      clearRoomTimers(room);
+      rooms.delete(roomCode);
+      return;
+    }
+
+    if (room.hostId === socket.id) {
+      room.hostId = room.players[0].id;
+      io.to(roomCode).emit('system_message', {
+        text: `${room.players[0].nickname}님이 새로운 방장이 되었습니다.`
+      });
+    }
+
+    io.to(roomCode).emit('room_update', getRoomState(room));
+    if (room.status === 'PLAYING' && room.players.length < 1) endGame(room);
+  });
+});
+
+function startRound(room) {
+  clearRoomTimers(room);
+
+  room.currentRound         += 1;
+  room.answeredThisRound    = false;
+  room.firstCorrectPlayerId = null;
+  room.musicStartedSockets  = new Set();
+
+  const question = room.questions[room.currentRound - 1];
+  if (!question) return endGame(room);
+
+  io.to(room.code).emit('round_start', {
+    round:        room.currentRound,
+    totalRounds:  room.questions.length,
+    category:     question.category,
+    hint:         question.hint,
+    youtubeId:    question.youtubeId,
+    youtubeStart: question.youtubeStart,
+    youtubeEnd:   question.youtubeEnd,
+    timeLimit:    ROUND_TIME_LIMIT
+  });
+
+  io.to(room.code).emit('room_update', getRoomState(room));
+
+  const fallbackDelay = room.currentRound === 1 ? 40000 : 15000;
+
+  room.fallbackTimer = setTimeout(() => {
+    room.fallbackTimer = null;
+    if (!room.answeredThisRound && !room.roundTimer) {
+      console.log(`[fallback] 방 ${room.code} 라운드 ${room.currentRound} — music_started 미수신, 강제 시작`);
+      startRoundTimer(room);
+    }
+  }, fallbackDelay);
+}
+
+function checkEndOrNextRound(room) {
+  const winner = room.players.find(p => p.score >= room.targetScore);
+  if (winner || room.currentRound >= room.questions.length) {
+    endGame(room);
+  } else {
+    startRound(room);
+  }
+}
+
+function endGame(room) {
+  clearRoomTimers(room)
+
+  // ① 점수 초기화 전에 finalScores 캡처
+  const finalScores = [...room.players]
+    .sort((a, b) => b.score - a.score)
+    .map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+
+  // ② 승리/무승부 판정
+  let winner = null
+  let isDraw = false
+
+  if (finalScores.length > 0 && finalScores[0].score > 0) {
+    const topScore = finalScores[0].score
+    const topGroup = finalScores.filter(p => p.score === topScore)
+    if (topGroup.length === 1) {
+      winner = topGroup[0]
+    } else {
+      isDraw = true // 동점자 2명 이상
+    }
+  }
+
+  // ③ game_over 먼저 emit (점수 초기화 전!)
+  io.to(room.code).emit('game_over', {
+    winner,
+    isDraw,
+    drawPlayers: isDraw ? finalScores.filter(p => p.score === finalScores[0].score) : [],
+    finalScores,
+    roomCode: room.code
   })
+
+  // ④ 1.5초 후 방 상태 초기화 (game_over 수신 후에 초기화)
+  setTimeout(() => {
+    room.status = 'WAITING'
+    room.currentRound = 0
+    room.players.forEach(p => { p.score = 0; p.isReady = false })
+    io.to(room.code).emit('room_update', getRoomState(room))
+  }, 1500)
 }
 
-function delay(ms) {
-  return new Promise(res => setTimeout(res, ms))
-}
-
-// ─── 메인 컴포넌트 ────────────────────────────────────────────
-export default function GameScreen() {
-  const { state, submitAnswer, backToTitle } = useGame()
-  const { emit, on }            = useSocket()
-
-  const {
-    players, myId, nickname, hostId,
-    currentRound, totalRounds,
-    category, hint,
-    youtubeId, youtubeStart, youtubeEnd,
-    roundActive, lastResult, targetScore,
-    timeLimit: serverTimeLimit
-  } = state
-
-  const me = players?.find(p => p.id === myId)
-  const isHost = !!(me?.isHost || (hostId && myId === hostId))
-
-  const [soundUnlocked, setSoundUnlocked] = useState(false)
-  const [isPlaying,     setIsPlaying]     = useState(false)
-  const [timerActive,   setTimerActive]   = useState(false)
-  const [timerLimit,    setTimerLimit]    = useState(serverTimeLimit || 25)
-  const [mediaReady,    setMediaReady]    = useState(false)
-  const [answer,        setAnswer]        = useState('')
-  const [submitted,     setSubmitted]     = useState(false)
-  const [flashWrong,    setFlashWrong]    = useState(false)
-  const [phaseLabel,    setPhaseLabel]    = useState('접속 대기 중...')
-  const [showResult,    setShowResult]    = useState(false)
-  const [playbackError, setPlaybackError] = useState(false)
-  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false) // ★ 뒤로가기 방지 모달
-  const [openingPhase,  setOpeningPhase]  = useState(false)       // ★ 오프닝 안내방송 재생 중 여부
-
-  const inputRef           = useRef(null)
-  const playerRef          = useRef(null)
-  const audioCtxRef        = useRef(null)
-  const korVoiceRef        = useRef(null)
-  const hostElemId         = useRef(`yt-${Math.random().toString(36).slice(2)}`)
-  const seqAbortRef        = useRef(null)
-  const openingDoneRef     = useRef(false)
-  const skipOpeningRef     = useRef(null)   // ★ 호출하면 오프닝만 즉시 종료
-  const musicEndResolveRef = useRef(null)
-  const tickRef            = useRef(null)
-  const musicStartedRef    = useRef(false)
-
-  const categoryRef = useRef(category)
-  useEffect(() => { categoryRef.current = category }, [category])
-  
-  const targetScoreRef = useRef(targetScore)
-  useEffect(() => { targetScoreRef.current = targetScore }, [targetScore])
-
-  const getAudioCtx = useCallback(() => {
-    if (!audioCtxRef.current) {
-      const Ctor = window.AudioContext || window.webkitAudioContext
-      if (Ctor) audioCtxRef.current = new Ctor()
-    }
-    return audioCtxRef.current
-  }, [])
-
-  // ─── 뒤로가기 / 새로고침 실수 방지 ──────────────────────────
-  // 더미 히스토리 항목을 쌓아 뒤로가기 1회를 흡수하고, 대신 확인 모달을 띄운다.
-  useEffect(() => {
-    window.history.pushState({ guard: true }, '')
-
-    const onPop = () => {
-      setShowLeaveConfirm(true)
-      window.history.pushState({ guard: true }, '') // 가드 재충전
-    }
-    window.addEventListener('popstate', onPop)
-
-    // 새로고침/탭 닫기 → 브라우저 기본 경고창
-    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = '' }
-    window.addEventListener('beforeunload', onBeforeUnload)
-
-    return () => {
-      window.removeEventListener('popstate', onPop)
-      window.removeEventListener('beforeunload', onBeforeUnload)
-    }
-  }, [])
-
-  const confirmLeave = useCallback(() => {
-    setShowLeaveConfirm(false)
-    backToTitle() // 메인으로. GameScreen 언마운트 → 위 리스너 자동 정리
-  }, [backToTitle])
-
-  // 한국어 음성 초기화
-  useEffect(() => {
-    const init = () => {
-      const voices = window.speechSynthesis.getVoices()
-      const ko = voices.filter(v => v.lang.startsWith('ko'))
-      korVoiceRef.current = (
-        ko.find(v => /natural|premium|google|siri|yuna/i.test(v.name)) || ko[0] || null
-      )
-    }
-    init()
-    window.speechSynthesis.onvoiceschanged = init
-  }, [])
-
-  // YouTube Player 초기화
-  useEffect(() => {
-    let destroyed = false
-    loadYouTubeApi().then(YT => {
-      if (destroyed) return
-      playerRef.current = new YT.Player(hostElemId.current, {
-        width: 1, height: 1,
-        playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, playsinline: 1, rel: 0 },
-        events: {
-          onReady: () => setMediaReady(true),
-          onStateChange: (e) => ytStateHandlerRef.current(e),
-          onError: () => {
-            setIsPlaying(false)
-            setPlaybackError(true)
-            musicEndResolveRef.current?.()
-            musicEndResolveRef.current = null
-          }
-        }
-      })
-    })
-    return () => { destroyed = true; playerRef.current?.destroy?.() }
-  }, [])
-
-  // YouTube 상태 핸들러
-  const ytStateHandlerRef = useRef()
-  ytStateHandlerRef.current = (event) => {
-    if (event.data === YT_STATE.PLAYING) {
-      setIsPlaying(true)
-      setPlaybackError(false)
-      if (!musicStartedRef.current) {
-        musicStartedRef.current = true
-        emit('music_started')
-      }
-    }
-    if (event.data === YT_STATE.PAUSED || event.data === YT_STATE.ENDED) {
-      setIsPlaying(false)
-    }
-    if (event.data === YT_STATE.ENDED) {
-      musicEndResolveRef.current?.()
-      musicEndResolveRef.current = null
-    }
-  }
-
-  // ★ timer_start 수신 — useSocket의 on() 직접 사용
-  useEffect(() => {
-    const unsub = on('timer_start', ({ timeLimit }) => {
-      console.log('[timer_start] 수신:', timeLimit)
-      setTimerLimit(timeLimit)
-      setTimerActive(true)
-    })
-    return unsub
-  }, [on])
-
-  // ★ skip_opening 수신 — 방장이 누르면 서버가 전원에게 브로드캐스트 → 모두 동시에 오프닝 스킵
-  useEffect(() => {
-    const unsub = on('skip_opening', () => {
-      skipOpeningRef.current?.()
-    })
-    return unsub
-  }, [on])
-
-  const handleSkipOpening = useCallback(() => {
-    emit('skip_opening') // 서버가 host 여부 검증 후 전원에게 재전송
-  }, [emit])
-  function playMusic(videoId, startSec, endSec, signal) {
-    return new Promise((resolve) => {
-      if (signal?.aborted) { resolve(); return }
-
-      const start   = Number(startSec) || 0
-      const end     = Number(endSec)   || 0
-      const clipSec = (end > start) ? (end - start) : 10
-
-      let resolved = false
-      const safeResolve = () => {
-        if (resolved) return
-        resolved = true
-        musicEndResolveRef.current = null
-        resolve()
-      }
-
-      musicEndResolveRef.current = safeResolve
-
-      try {
-        playerRef.current?.loadVideoById({
-          videoId,
-          startSeconds: start,
-          endSeconds: end > start ? end : undefined
-        })
-        setTimeout(() => {
-          if (signal?.aborted) { safeResolve(); return }
-          playerRef.current?.playVideo?.()
-        }, 300)
-      } catch(e) { safeResolve(); return }
-
-      const safetyTimer = setTimeout(() => {
-        try { playerRef.current?.stopVideo?.() } catch(e) {}
-        safeResolve()
-      }, clipSec * 1000)
-
-      signal?.addEventListener('abort', () => {
-        clearTimeout(safetyTimer)
-        try { playerRef.current?.stopVideo?.() } catch(e) {}
-        safeResolve()
-      })
-
-      const orig = safeResolve
-      musicEndResolveRef.current = () => { clearTimeout(safetyTimer); orig() }
-    })
-  }
-
-  // 틱 소리 — 서버가 끊을 때까지 반복
-  function playTicksTillEnd(signal) {
-    return new Promise(resolve => {
-      clearInterval(tickRef.current)
-      tickRef.current = setInterval(() => {
-        if (signal?.aborted) {
-          clearInterval(tickRef.current); resolve(); return
-        }
-        const ctx = getAudioCtx()
-        if (ctx) playTick(ctx)
-      }, 1000)
-    })
-  }
-
-  // 언락 버튼
-  const handleUnlock = useCallback(async () => {
-  const ctx = getAudioCtx()
-  if (ctx?.state === 'suspended') await ctx.resume()
-
-  // ★ 추가: HTML5 Audio 객체 정책 우회를 위한 빈 소리 1회 재생
-  const dummyAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA')
-  dummyAudio.play().catch(() => {}) // 에러가 나도 무시 (언락이 목적)
-
-  // ★ AudioContext 완전히 깨울 때까지 대기 (무음 버퍼 재생)
-  await new Promise(resolve => {
-    const buf = ctx.createBuffer(1, 1, 22050)
-    const src = ctx.createBufferSource()
-    src.buffer = buf
-    src.connect(ctx.destination)
-    src.onended = resolve
-    src.start(0)
-    setTimeout(resolve, 300) // 안전망
-  })
-
-  setSoundUnlocked(true)
-  emit('ready_to_start')
-  setPhaseLabel('다른 플레이어들을 기다리는 중...')
-  if (playerRef.current?.playVideo) {
-    playerRef.current.playVideo()
-    setTimeout(() => playerRef.current?.pauseVideo?.(), 200)
-  }
-}, [getAudioCtx])
-
-  // 라운드 시퀀스
-  // allReady(서버가 보내지 않는 이벤트) 대신 soundUnlocked로 게이트.
-  // 준비 동기화는 서버 ready_to_start 로직이 담당하므로, 클라이언트는
-  // round_start로 roundActive가 켜지면 바로 시퀀스를 돌리면 된다.
-  useEffect(() => {
-    if (!soundUnlocked || !roundActive) return
-
-    const prevAc = seqAbortRef.current
-    const ac = new AbortController()
-    seqAbortRef.current = ac
-    prevAc?.abort()
-    const sig = ac.signal
-
-    setAnswer(''); setSubmitted(false); setFlashWrong(false)
-    setIsPlaying(false); setTimerActive(false)
-    setShowResult(false); setPlaybackError(false)
-    musicStartedRef.current = false
-
-    async function runSequence() {
-      const ctx = getAudioCtx()
-    
-      // 1. 오프닝 (1회) — 방장이 스킵하면 오프닝만 중단하고 다음 단계로 진행
-      if (!openingDoneRef.current) {
-        openingDoneRef.current = true
-        setPhaseLabel('🎙️ 오프닝 안내 방송 중...')
-        if (ctx?.state === 'suspended') await ctx.resume()
-
-        // 오프닝 전용 중단 컨트롤러: 스킵 버튼/이벤트가 이걸 abort한다.
-        // (전체 라운드를 멈추는 sig와 분리 → 스킵해도 주제/음악 단계는 그대로 진행)
-        const openingAc = new AbortController()
-        const onMainAbort = () => openingAc.abort()
-        sig.addEventListener('abort', onMainAbort)
-        skipOpeningRef.current = () => openingAc.abort()
-        setOpeningPhase(true)
-
-        await delay(700)
-        if (!sig.aborted && !openingAc.signal.aborted) {
-          await playAudioFile(OPENING_AUDIO, openingAc.signal)  // opening.mp3 (스킵 가능)
-        }
-
-        // 오프닝 단계 정리
-        setOpeningPhase(false)
-        skipOpeningRef.current = null
-        sig.removeEventListener('abort', onMainAbort)
-
-        if (sig.aborted) return       // 전체 라운드가 중단된 경우만 종료
-        await delay(openingAc.signal.aborted ? 150 : 500) // 스킵 시 살짝만 텀
-        if (sig.aborted) return
-      }
-    
-      // 2. 주제 안내 MP3 (기계음 제거, 타이밍만 유지)
-      const currentCategory = categoryRef.current
-      if (currentCategory) {
-        setPhaseLabel(`🎵 주제: ${currentCategory}`)
-        
-        // ★ NFC 정규화 먼저: macOS 등에서 자소분리(NFD)된 한글도 정상 매칭되게 함.
-        //   (정규화 없이 [^가-힣...] 정규식을 돌리면 NFD 문자열이 통째로 지워짐)
-        const cleanCategory = currentCategory.normalize('NFC').replace(/[^가-힣a-zA-Z0-9]/g, '')
-        const catSrc = CATEGORY_AUDIO[cleanCategory]
-        
-        if (catSrc) {
-          // 재생 시작 시간 기록
-          const startTime = Date.now();
-          
-          await playAudioFile(catSrc, sig)
-          if (sig.aborted) return
-          
-          // 파일이 1초 미만으로 너무 짧게 끝나거나 실패하더라도 흐름을 위해 최소 2.5초는 대기
-          const elapsedTime = Date.now() - startTime;
-          if (elapsedTime < 2500) {
-            await delay(2500 - elapsedTime);
-          }
-        } else {
-          // 파일이 아예 누락된 경우 기계음 없이 콘솔에 경고만 띄우고 2.5초 대기
-          console.warn(`[오디오 누락] '${cleanCategory}' 파일 없음`)
-          await delay(2500)
-        }
-        
-        await delay(500)
-        if (sig.aborted) return
-      }
-    
-      // 3. 음악 재생 (기존 그대로)
-      if (!youtubeId) { emit('skip_round'); return }
-      setPhaseLabel('🎧 소리를 들어보세요!')
-      await playMusic(youtubeId, youtubeStart, youtubeEnd, sig)
-      if (sig.aborted) return
-    
-      // 4. 틱 소리 (기존 그대로)
-      setIsPlaying(false)
-      setPhaseLabel('⌨️ 정답을 입력하세요!')
-      await playTicksTillEnd(sig)
-    }
-
-    runSequence()
-
-    return () => {
-      ac.abort()
-      clearInterval(tickRef.current)
-      window.speechSynthesis.cancel()
-      try { playerRef.current?.stopVideo?.() } catch(e) {}
-    }
-  }, [soundUnlocked, roundActive, youtubeId, currentRound, emit, getAudioCtx])
-
-  // 라운드 비활성화 정리
-  useEffect(() => {
-    if (!roundActive) {
-      seqAbortRef.current?.abort()
-      clearInterval(tickRef.current)
-      setTimerActive(false)
-      setIsPlaying(false)
-      try { playerRef.current?.stopVideo?.() } catch(e) {}
-    }
-  }, [roundActive])
-
-  // 결과 수신
-  useEffect(() => {
-    if (!lastResult) return
-    if (!lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) return
-
-    seqAbortRef.current?.abort()
-    clearInterval(tickRef.current)
-    try { playerRef.current?.stopVideo?.() } catch(e) {}
-    setIsPlaying(false)
-    setTimerActive(false)
-    setShowResult(true)
-
-    const t = setTimeout(() => setShowResult(false), 2500)
-    return () => clearTimeout(t)
-  }, [lastResult])
-
-  // 개인 오답 시 입력창 잠금 해제 및 빨간 화면(flashWrong) 처리
-  useEffect(() => {
-    if (!lastResult) return
-    // 누군가 정답을 맞히거나(winnerId) 시간초과(noWinner)로 라운드가 완전히 끝난 경우는 무시
-    if (lastResult.correct || lastResult.winnerId || lastResult.noWinner) return
-    
-    // 만약 틀린 사람이 '나'라면 (서버에서 lastResult에 틀린 사람의 id를 userId 등으로 보내준다고 가정)
-    // (서버가 별도 ID를 안 준다면 본인 화면에서 틀렸다는 응답이 왔을 때로 처리)
-    setFlashWrong(true)   // 빨간 화면 깜빡임
-    setSubmitted(false)   // ★ 핵심: 입력창 잠금 해제
-    setAnswer('')         // 입력창 비우기
-    
-    // 1초 뒤 빨간 화면 깜빡임 효과 제거
-    const t = setTimeout(() => {
-      setFlashWrong(false)
-      inputRef.current?.focus() // 다시 타자 칠 수 있게 포커스
-    }, 1000)
-    
-    return () => clearTimeout(t)
-  }, [lastResult])
-
-  // 포커스
-  useEffect(() => {
-    if (roundActive && soundUnlocked)
-      setTimeout(() => inputRef.current?.focus(), 300)
-  }, [roundActive, soundUnlocked])
-
-  const handleSubmit = useCallback(() => {
-    if (!answer.trim() || submitted || !roundActive) return
-    setSubmitted(true)
-    submitAnswer(answer.trim())
-  }, [answer, submitted, roundActive, submitAnswer])
-
-  const handleKey = (e) => { if (e.key === 'Enter') handleSubmit() }
-
-  const sortedPlayers = [...players].sort((a, b) => b.score - a.score)
-  const progressPct   = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
-
-  return (
-    <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
-
-      {/* ★ 나가기 확인 모달 (뒤로가기/실수 방지) */}
-      {showLeaveConfirm && (
-        <div
-          onClick={() => setShowLeaveConfirm(false)}
-          style={{
-            position:'fixed', inset:0, zIndex:100000,
-            background:'rgba(4,5,15,0.7)', backdropFilter:'blur(8px)',
-            display:'flex', alignItems:'center', justifyContent:'center', padding:16
-          }}
-        >
-          <div
-            className="glass-panel animate-scaleIn"
-            onClick={e => e.stopPropagation()}
-            style={{ width:'100%', maxWidth:380, padding:24, textAlign:'center' }}
-          >
-            <div style={{ fontSize:'2.5rem', marginBottom:12 }}>🚪</div>
-            <h2 style={{ marginBottom:8 }}>게임을 나가시겠어요?</h2>
-            <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem', marginBottom:20 }}>
-              지금 나가면 진행 중인 게임에서 빠지게 됩니다.
-            </p>
-            <div style={{ display:'flex', gap:10 }}>
-              <button className="btn btn-secondary" style={{ flex:1 }}
-                      onClick={() => setShowLeaveConfirm(false)}>계속하기</button>
-              <button className="btn btn-primary" style={{ flex:1 }}
-                      onClick={confirmLeave}>나가기</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* YouTube 숨김 플레이어 */}
-      <div style={{ position:'absolute', width:1, height:1, overflow:'hidden', opacity:0, pointerEvents:'none' }}>
-        <div id={hostElemId.current} />
-      </div>
-
-      {/* 언락 오버레이 */}
-      {!soundUnlocked && (
-        <div onClick={handleUnlock} style={{
-          position:'fixed', inset:0, zIndex:99999,
-          background:'rgba(4,5,15,0.96)', backdropFilter:'blur(16px)',
-          display:'flex', flexDirection:'column',
-          alignItems:'center', justifyContent:'center',
-          cursor:'pointer', gap:'20px'
-        }}>
-          <div style={{ fontSize:'5rem', animation:'float 1.5s ease-in-out infinite' }}>🎵</div>
-          <h2 style={{
-            fontSize:'1.8rem', color:'#06b6d4',
-            textShadow:'0 0 15px rgba(6,182,212,0.6)',
-            textAlign:'center', padding:'0 24px', wordBreak:'keep-all'
-          }}>
-            화면을 터치해서 게임을 시작하세요
-          </h2>
-          <p style={{ color:'#94a3b8', fontSize:'1rem', textAlign:'center', padding:'0 24px' }}>
-            오디오 시스템 활성화를 위해 터치가 필요합니다
-          </p>
-        </div>
-      )}
-
-      {/* 결과 오버레이 */}
-      {showResult && lastResult && (
-        <div className="result-overlay show">
-          {lastResult.winnerId && (
-            <div className="result-banner correct animate-scaleIn">
-              <div className="result-icon">🎯</div>
-              <div className="result-text">
-                <span className="result-winner">{lastResult.winnerNickname}</span>
-                <span>정답!</span>
-              </div>
-              <div className="result-answer">정답: {lastResult.answer}</div>
-            </div>
-          )}
-          {lastResult.noWinner && (
-            <div className="result-banner timeout animate-scaleIn">
-              <div className="result-icon">⏰</div>
-              <div className="result-text">시간 초과!</div>
-              <div className="result-answer">정답: {lastResult.answer}</div>
-              <div className="result-sub">{lastResult.message}</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 게임 레이아웃 */}
-      <div className="game-layout">
-
-        {/* 스코어보드 */}
-        <div className="scoreboard-panel glass-panel">
-          <div className="scoreboard-title">🏆 스코어보드</div>
-          <div className="score-list">
-            {sortedPlayers.map((p, i) => {
-              const isMe     = p.id === myId || p.nickname === nickname
-              const isWinner = lastResult?.winnerId === p.id
-              return (
-                <div key={p.id} className={`score-row ${isMe?'me':''} ${isWinner?'just-won':''}`}>
-                  <span className="rank-num">{i + 1}</span>
-                  <span className="player-ava">{getAvatar(p.id)}</span>
-                  <span className="score-name">
-                    {p.nickname}
-                    {isMe && <span className="me-badge">나</span>}
-                  </span>
-                  <div className="score-bar-wrap">
-                    <div className="score-bar" style={{ width:`${Math.min((p.score/targetScore)*100,100)}%` }} />
-                  </div>
-                  <span className="score-num">{p.score}</span>
-                  <span className="score-target">/{targetScore}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* 메인 */}
-        <div className="game-center">
-          <div className="round-progress">
-            <div className="round-info">
-              <span className="glow-cyan">라운드 {currentRound || 1}</span>
-              <span style={{ color:'var(--text-secondary)' }}> / {totalRounds}</span>
-            </div>
-            <div className="progress-track">
-              <div className="progress-fill" style={{ width:`${progressPct}%` }} />
-            </div>
-          </div>
-
-          {category && (
-            <div className="category-row animate-fadeIn">
-              <div className="category-badge">🎵 {category}</div>
-              {hint && <span className="hint-text">힌트: {hint}</span>}
-            </div>
-          )}
-
-          <div className="audio-area glass-panel">
-            <div className="audio-inner">
-              {mediaReady
-                ? <WaveformVisualizer isPlaying={isPlaying} />
-                : <div className="audio-loading"><div className="loading-spinner" /><span>오디오 초기화 중...</span></div>
-              }
-              {playbackError && (
-                <div style={{ color:'#f87171', fontSize:'0.8rem', marginTop:'8px' }}>
-                  ⚠️ 영상을 불러올 수 없습니다. 다음 라운드를 기다려주세요.
-                </div>
-              )}
-              <div className="phase-label">{phaseLabel}</div>
-              {isHost && openingPhase && (
-                <button
-                  onClick={handleSkipOpening}
-                  style={{
-                    marginTop: 10,
-                    padding: '8px 18px',
-                    borderRadius: 999,
-                    border: '1px solid rgba(255,255,255,0.25)',
-                    background: 'rgba(255,255,255,0.08)',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.85rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  ⏭️ 안내방송 건너뛰기 (방장)
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className={`answer-area glass-panel ${roundActive?'active':''}`}>
-            {roundActive ? (
-              <>
-                <div className="answer-row">
-                  <input
-                    ref={inputRef}
-                    className={`input answer-input ${flashWrong?'wrong':''}`}
-                    placeholder="정답을 입력하세요..."
-                    value={answer}
-                    onChange={e => setAnswer(e.target.value)}
-                    onKeyDown={handleKey}
-                    disabled={submitted && !flashWrong}
-                    maxLength={40}
-                    autoComplete="off"
-                    autoCapitalize="none"
-                  />
-                  <button
-                    className="btn btn-primary submit-btn"
-                    onClick={handleSubmit}
-                    disabled={!answer.trim() || (submitted && !flashWrong)}
-                  >
-                    제출 ↵
-                  </button>
-                </div>
-                {submitted && !flashWrong && <p className="submitted-hint">⏳ 판정 중...</p>}
-                {flashWrong && <p className="wrong-hint">❌ 틀렸습니다! 다시 시도하세요.</p>}
-              </>
-            ) : (
-              <p className="waiting-next">⏳ 다음 라운드 준비 중...</p>
-            )}
-          </div>
-        </div>
-
-        {/* 타이머 */}
-        <div className="timer-panel glass-panel">
-          <div className="timer-label">남은 시간</div>
-          <TimerRing
-            key={`${currentRound}-${timerActive}`}
-            timeLimit={timerLimit}
-            active={timerActive}
-          />
-          <div className="timer-hint">빠를수록 유리!</div>
-        </div>
-
-      </div>
-    </div>
-  )
-}
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`🚀 Sound Quiz Server on port ${PORT} | CLIENT: ${CLIENT_URL}`);
+});
