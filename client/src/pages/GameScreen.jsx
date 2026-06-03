@@ -90,7 +90,7 @@ const CATEGORY_AUDIO = {
   '군가': '/sounds/categories/군가.mp3',
   '브랜드': '/sounds/categories/브랜드.mp3',
   '예능': '/sounds/categories/예능.mp3',
-  '유튜버': '/sounds/categories/유튜버.mp3',
+  '유튜버': '/sounds/categories/유튜버.mp3'
 };
 const OPENING_AUDIO = '/sounds/opening.mp3'          // (구버전 호환용, 미사용 가능)
 const INTRO_AUDIO   = '/sounds/opening_intro.mp3'    // 설명 소리 (스킵 대상)
