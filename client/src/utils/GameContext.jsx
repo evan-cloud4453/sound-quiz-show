@@ -147,7 +147,13 @@ function reducer(state, action) {
 
 export function GameProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
-  const { emit, on, connected } = useSocket()
+  const { emit, on, connected, socketId } = useSocket()
+
+  // ★ 내 소켓 ID를 myId로 저장 (서버의 hostId/플레이어 id와 동일 체계).
+  //   이게 있어야 '내가 방장인지' 판별(myId === hostId)이 정확히 동작한다.
+  useEffect(() => {
+    if (socketId) dispatch({ type: 'SET_MY_ID', id: socketId })
+  }, [socketId, connected])
 
   // Listen to socket events
   useEffect(() => {
