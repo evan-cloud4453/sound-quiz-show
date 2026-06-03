@@ -115,6 +115,21 @@ export default function LobbyScreen() {
         </div>
 
         <div className="lobby-body">
+          {/* ★ 게임 정보 + 설정 (플레이어 목록 위로 이동) */}
+          <div className="glass-panel animate-fadeInUp" style={{ animationDelay: '0.05s', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="setting-info" style={{ justifyContent: 'center' }}>
+              <div className="info-chip">🏆 목표 {targetScore}점</div>
+              <div className="info-chip">🎵 {roundCount}라운드</div>
+              {currentIsHost && <div className="info-chip">📚 {catSummary}</div>}
+              <div className="info-chip">⏱️ 라운드당 15초</div>
+            </div>
+            {currentIsHost && (
+              <button className="btn btn-secondary" onClick={() => setShowSettings(true)}>
+                ⚙️ 게임 설정
+              </button>
+            )}
+          </div>
+
           {/* Players list */}
           <div className="glass-panel players-panel animate-fadeInUp" style={{ animationDelay: '0.1s' }}>
             <div className="panel-title">
@@ -244,20 +259,9 @@ export default function LobbyScreen() {
             </div>
           </div>
 
-          {/* Host controls */}
+          {/* Action controls */}
           {currentIsHost ? (
             <div className="animate-fadeInUp" style={{ display: 'flex', flexDirection: 'column', gap: 12, animationDelay: '0.3s' }}>
-              <div className="setting-info" style={{ justifyContent: 'center' }}>
-                <div className="info-chip">🏆 목표 {targetScore}점</div>
-                <div className="info-chip">🎵 {roundCount}라운드</div>
-                <div className="info-chip">📚 {catSummary}</div>
-                <div className="info-chip">⏱️ 라운드당 15초</div>
-              </div>
-
-              <button className="btn btn-secondary" onClick={() => setShowSettings(true)}>
-                ⚙️ 게임 설정
-              </button>
-
               {!allReady && (
                 <p style={{ textAlign: 'center', color: 'var(--warn, #f59e0b)', fontSize: '0.82rem', margin: 0 }}>
                   ⏳ 모든 플레이어가 준비완료해야 시작할 수 있어요.
@@ -273,20 +277,12 @@ export default function LobbyScreen() {
             </div>
           ) : (
             <div className="animate-fadeInUp" style={{ display: 'flex', flexDirection: 'column', gap: 12, animationDelay: '0.3s' }}>
-              {/* 방장이 아닌 유저도 방 설정 확인 (주제는 제외) */}
-              <div className="setting-info" style={{ justifyContent: 'center' }}>
-                <div className="info-chip">🏆 목표 {targetScore}점</div>
-                <div className="info-chip">🎵 {roundCount}라운드</div>
-                <div className="info-chip">⏱️ 라운드당 15초</div>
-              </div>
-
               <button
                 className={`btn btn-lg ${iAmReady ? 'btn-secondary' : 'btn-primary'}`}
                 onClick={toggleReady}
               >
                 {iAmReady ? '✅ 준비완료 (취소하려면 누르세요)' : '🙋 준비완료'}
               </button>
-
               <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.82rem', margin: 0 }}>
                 {iAmReady ? '방장이 게임을 시작하길 기다리는 중...' : '준비되면 위 버튼을 눌러주세요!'}
               </p>
