@@ -417,7 +417,7 @@ export default function GameScreen() {
         if (sig.aborted) return
 
         // GO(시작 소리)는 스킵과 무관하게 항상 재생 (라운드 전체 중단 시에만 멈춤)
-        setPhaseLabel('🚀 자, 이제 게임을 시작합니다!')
+        setPhaseLabel('자, 이제 게임을 시작합니다!')
         await playAudioFile(GO_AUDIO, sig)
         if (sig.aborted) return
         await delay(300)
@@ -427,7 +427,7 @@ export default function GameScreen() {
       // 2. 주제 안내 MP3 (기계음 제거, 타이밍만 유지)
       const currentCategory = categoryRef.current
       if (currentCategory) {
-        setPhaseLabel(`🎵 주제: ${currentCategory}`)
+        setPhaseLabel(`주제: ${currentCategory}`)
         
         // ★ NFC 정규화 먼저: macOS 등에서 자소분리(NFD)된 한글도 정상 매칭되게 함.
         //   (정규화 없이 [^가-힣...] 정규식을 돌리면 NFD 문자열이 통째로 지워짐)
@@ -561,7 +561,6 @@ export default function GameScreen() {
             onClick={e => e.stopPropagation()}
             style={{ width:'100%', maxWidth:380, padding:24, textAlign:'center' }}
           >
-            <div style={{ fontSize:'2.5rem', marginBottom:12 }}>🚪</div>
             <h2 style={{ marginBottom:8 }}>게임을 나가시겠어요?</h2>
             <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem', marginBottom:20 }}>
               지금 나가면 진행 중인 게임에서 빠지게 됩니다.
@@ -633,7 +632,7 @@ export default function GameScreen() {
 
         {/* 스코어보드 */}
         <div className="scoreboard-panel glass-panel">
-          <div className="scoreboard-title">🏆 스코어보드</div>
+          <div className="scoreboard-title">스코어보드</div>
           <div className="score-list">
             {sortedPlayers.map((p, i) => {
               const isMe     = p.id === myId || p.nickname === nickname
@@ -671,7 +670,7 @@ export default function GameScreen() {
 
           {category && (
             <div className="category-row animate-fadeIn">
-              <div className="category-badge">🎵 {category}</div>
+              <div className="category-badge">{category}</div>
               {hint && <span className="hint-text">힌트: {hint}</span>}
             </div>
           )}
@@ -702,7 +701,7 @@ export default function GameScreen() {
                     cursor: 'pointer'
                   }}
                 >
-                  ⏭️ 설명 건너뛰고 시작 (방장)
+                  설명 건너뛰고 시작
                 </button>
               )}
             </div>
@@ -732,11 +731,11 @@ export default function GameScreen() {
                     제출 ↵
                   </button>
                 </div>
-                {submitted && !flashWrong && <p className="submitted-hint">⏳ 판정 중...</p>}
+                {submitted && !flashWrong && <p className="submitted-hint">판정 중...</p>}
                 {flashWrong && <p className="wrong-hint">❌ 틀렸습니다! 다시 시도하세요.</p>}
               </>
             ) : (
-              <p className="waiting-next">⏳ 다음 라운드 준비 중...</p>
+              <p className="waiting-next">다음 라운드 준비 중...</p>
             )}
           </div>
         </div>
