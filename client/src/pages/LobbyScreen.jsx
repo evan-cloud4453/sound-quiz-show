@@ -153,7 +153,7 @@ export default function LobbyScreen() {
                   style={{ flex: 1 }}
                   onClick={() => setShowManage(true)}
                 >
-                  방장 넘기기
+                  플레이어 관리
                 </button>
               )}
             </div>
