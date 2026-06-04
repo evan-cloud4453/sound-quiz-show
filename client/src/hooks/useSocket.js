@@ -57,7 +57,8 @@ export function useSocket() {
       'hint_revealed',
       'chat_message',   // ★ 채팅
       'back_to_lobby',  // ★ 게임 종료 후 대기방 복귀
-      'skip_opening'    // ★ 방장의 오프닝 안내방송 스킵
+      'skip_opening',   // ★ 방장의 오프닝 안내방송 스킵
+      'kicked'          // ★ 강퇴 당함
     ]
 
     const forwarders = {}
