@@ -170,9 +170,16 @@ export function GameProvider({ children }) {
       on('game_over',    data => dispatch({ type: 'GAME_OVER',    data })),
       on('chat_message', data => dispatch({ type: 'CHAT_MESSAGE', data })),   // ★ 채팅
       on('back_to_lobby', ()  => dispatch({ type: 'BACK_TO_LOBBY' })),        // ★ 대기방 복귀
+      on('kicked', () => {                                                     // ★ 강퇴 당함
+        dispatch({ type: 'RESET' })
+        if (typeof window !== 'undefined') window.alert('방장에 의해 방에서 내보내졌습니다.')
+      }),
+      // ★ 방 알림(입장/퇴장/방장 위임/설정 변경/강퇴)을 채팅창에 시스템 메시지로 표시
       on('system_message', ({ text }) => {
-        dispatch({ type: 'SYSTEM_MSG', text })
-        setTimeout(() => dispatch({ type: 'CLEAR_SYSTEM_MSG' }), 4000)
+        dispatch({ type: 'CHAT_MESSAGE', data: {
+          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          system: true, text, ts: Date.now()
+        } })
       })
     ]
     return () => unsubs.forEach(u => u())
@@ -197,7 +204,8 @@ export function GameProvider({ children }) {
       targetScore: cfg.targetScore ?? 5,
       roundCount:  cfg.roundCount  ?? 10,
       categories:  cfg.categories  ?? [],
-      autoSkipOpening: !!cfg.autoSkipOpening   // ★ 재시작이면 true
+      autoSkipOpening: !!cfg.autoSkipOpening,   // ★ 재시작이면 true
+      fromRematch:     !!cfg.fromRematch        // ★ 재시작이면 준비 체크 건너뜀
     }
     dispatch({ type: 'SET_GAME_CONFIG', config: payload })
 
@@ -248,21 +256,29 @@ export function GameProvider({ children }) {
     emit('transfer_host', { targetId })
   }, [emit])
 
+  // ★ 강퇴 (방장만)
+  const kickPlayer = useCallback((targetId) => {
+    if (!targetId) return
+    emit('kick_player', { targetId })
+  }, [emit])
+
   // ★ 방 설정 실시간 공유 (방장만) — 설정창에서 값 변경 시 호출
   const updateSettings = useCallback((settings) => {
     emit('update_settings', settings || {})
   }, [emit])
 
+  // ★ 방 나가기 → 서버에서 방 제거 후 타이틀로 (나간 뒤 알림 받는 버그 방지)
   const backToTitle = useCallback(() => {
+    emit('leave_room')
     dispatch({ type: 'RESET' })
-  }, [])
+  }, [emit])
 
   return (
     <GameContext.Provider value={{
       state, dispatch,
       joinRoom, startGame, submitAnswer,
       sendChat, returnToLobby, backToTitle,
-      toggleReady, transferHost, updateSettings,
+      toggleReady, transferHost, kickPlayer, updateSettings,
       connected
     }}>
       {children}
