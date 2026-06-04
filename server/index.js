@@ -228,6 +228,9 @@ io.on('connection', (socket) => {
       socket.data.nickname = nickname;
 
       io.to(room.code).emit('room_update', getRoomState(room));
+      if (!isNewRoom) {
+        socket.to(room.code).emit('system_message', { text: `${nickname || '플레이어'}님이 입장했습니다.` });
+      }
       cb({ success: true, roomCode: room.code, isHost: isNewRoom });
     } catch (e) {
       console.error(e);
@@ -235,17 +238,20 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('start_game', ({ targetScore = 5, roundCount = ROUND_COUNT, categories = [], autoSkipOpening = false } = {}, cb) => {
+  socket.on('start_game', ({ targetScore = 5, roundCount = ROUND_COUNT, categories = [], autoSkipOpening = false, fromRematch = false } = {}, cb) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room)                     return cb?.({ error: '방을 찾을 수 없습니다.' });
       if (room.hostId !== socket.id) return cb?.({ error: '방장만 게임을 시작할 수 있습니다.' });
       if (room.status === 'PLAYING') return cb?.({ error: '이미 게임 중입니다.' });
 
-      // ★ 모든 (방장 외) 플레이어가 준비완료여야 시작 가능
-      const others = room.players.filter(p => p.id !== room.hostId);
-      if (!others.every(p => p.isReady)) {
-        return cb?.({ error: '아직 준비하지 않은 플레이어가 있습니다.' });
+      // ★ 대기방 시작 시에만 준비완료 게이트 적용. 재시작(rematch)은 같은 인원으로
+      //    바로 다시 하는 것이므로 준비 체크를 건너뛴다. (버그: 재시작 차단 방지)
+      if (!fromRematch) {
+        const others = room.players.filter(p => p.id !== room.hostId);
+        if (!others.every(p => p.isReady)) {
+          return cb?.({ error: '아직 준비하지 않은 플레이어가 있습니다.' });
+        }
       }
 
       const count = Math.max(1, Math.min(Number(roundCount) || ROUND_COUNT, 30));
@@ -437,7 +443,7 @@ io.on('connection', (socket) => {
       if (!target) return;
       room.hostId = targetId;
       io.to(room.code).emit('room_update', getRoomState(room));
-      io.to(room.code).emit('system_message', { text: `👑 ${target.nickname}님이 새 방장이 되었습니다.` });
+      io.to(room.code).emit('system_message', { text: `${target.nickname}님이 새 방장이 되었습니다.` });
     } catch (e) {
       console.error('transfer_host 오류:', e);
     }
@@ -453,6 +459,7 @@ io.on('connection', (socket) => {
       if (roundCount  != null) room.roundCount  = Math.max(1, Math.min(Number(roundCount) || room.roundCount, 30));
       if (Array.isArray(categories)) room.selectedCategories = categories;
       io.to(room.code).emit('room_update', getRoomState(room));
+      socket.to(room.code).emit('system_message', { text: '방 설정이 변경되었습니다.' });
     } catch (e) {
       console.error('update_settings 오류:', e);
     }
@@ -491,6 +498,59 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ── 강퇴 (방장만) ─────────────────────────────────────────────
+  socket.on('kick_player', ({ targetId } = {}) => {
+    try {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room || room.hostId !== socket.id) return;   // 방장만
+      if (targetId === room.hostId) return;             // 자기 자신 강퇴 불가
+      const target = room.players.find(p => p.id === targetId);
+      if (!target) return;
+
+      room.players = room.players.filter(p => p.id !== targetId);
+      room.musicStartedSockets?.delete(targetId);
+
+      // 강퇴 대상에게 알리고 방에서 제거
+      io.to(targetId).emit('kicked');
+      const targetSocket = io.sockets.sockets.get(targetId);
+      if (targetSocket) { targetSocket.leave(room.code); targetSocket.data.roomCode = null; }
+
+      io.to(room.code).emit('system_message', { text: `${target.nickname}님이 강퇴되었습니다.` });
+      io.to(room.code).emit('room_update', getRoomState(room));
+    } catch (e) {
+      console.error('kick_player 오류:', e);
+    }
+  });
+
+  // ── 방 나가기 (버튼) ──────────────────────────────────────────
+  // 소켓 연결은 유지한 채 방에서만 빠져나간다. (나간 뒤에도 알림 받는 버그 방지)
+  socket.on('leave_room', () => {
+    try {
+      const roomCode = socket.data.roomCode;
+      if (!roomCode) return;
+      const room = rooms.get(roomCode);
+      socket.leave(roomCode);
+      socket.data.roomCode = null;
+      if (!room) return;
+
+      const leaving = room.players.find(p => p.id === socket.id);
+      room.players = room.players.filter(p => p.id !== socket.id);
+      room.musicStartedSockets?.delete(socket.id);
+
+      if (room.players.length === 0) { clearRoomTimers(room); rooms.delete(roomCode); return; }
+
+      if (room.hostId === socket.id) {
+        room.hostId = room.players[0].id;
+        io.to(roomCode).emit('system_message', { text: `${room.players[0].nickname}님이 새로운 방장이 되었습니다.` });
+      } else if (leaving) {
+        io.to(roomCode).emit('system_message', { text: `${leaving.nickname}님이 나갔습니다.` });
+      }
+      io.to(roomCode).emit('room_update', getRoomState(room));
+    } catch (e) {
+      console.error('leave_room 오류:', e);
+    }
+  });
+
   socket.on('disconnect', () => {
     const roomCode = socket.data.roomCode;
     if (!roomCode) return;
@@ -510,6 +570,10 @@ io.on('connection', (socket) => {
       room.hostId = room.players[0].id;
       io.to(roomCode).emit('system_message', {
         text: `${room.players[0].nickname}님이 새로운 방장이 되었습니다.`
+      });
+    } else {
+      io.to(roomCode).emit('system_message', {
+        text: `${socket.data.nickname || '플레이어'}님이 나갔습니다.`
       });
     }
 
