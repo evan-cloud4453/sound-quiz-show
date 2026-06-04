@@ -132,7 +132,7 @@ export default function TitleScreen() {
                     cursor: 'pointer'
                   }}
                 >
-                  🔄
+                  ⟲
                 </button>
               </div>
             </div>
@@ -159,7 +159,7 @@ export default function TitleScreen() {
               onClick={handleStart}
               disabled={loading || !connected}
             >
-              {loading ? '⏳ 접속 중...' : mode === 'create' ? '방 생성' : '입장하기'}
+              {loading ? '접속 중...' : mode === 'create' ? '방 생성' : '입장하기'}
             </button>
           </div>
         )}
