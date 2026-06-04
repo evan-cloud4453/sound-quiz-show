@@ -34,8 +34,8 @@ export default function GameOverScreen() {
   const handleRematch = async () => {
     if (restarting) return
     setRestarting(true)
-    // 직전 게임 설정(목표 점수·라운드 수·주제)을 그대로 재사용 + 오프닝 설명 자동 스킵
-    await startGame({ targetScore, roundCount, categories: selectedCategories, autoSkipOpening: true })
+    // 직전 게임 설정 그대로 재사용 + 오프닝 설명 자동 스킵 + 준비 체크 건너뜀
+    await startGame({ targetScore, roundCount, categories: selectedCategories, autoSkipOpening: true, fromRematch: true })
     setRestarting(false)
   }
 
@@ -89,7 +89,7 @@ export default function GameOverScreen() {
 
         {/* Final scoreboard */}
         <div className="glass-panel final-scores animate-fadeInUp" style={{ animationDelay: '0.15s' }}>
-          <div className="scores-title">📊 최종 결과</div>
+          <div className="scores-title">최종 결과</div>
           <div className="final-list">
             {finalScores.map((p, i) => {
               const isMe = p.id === myId || p.nickname === nickname
@@ -134,23 +134,23 @@ export default function GameOverScreen() {
                 onClick={handleRematch}
                 disabled={restarting || returning}
               >
-                {restarting ? '⏳ 시작 중...' : '🚀 바로 다시 하기!'}
+                {restarting ? '시작하는 중...' : '다시 하기'}
               </button>
               <button
                 className="btn btn-secondary action-btn"
                 onClick={handleReturnToLobby}
                 disabled={restarting || returning}
               >
-                {returning ? '⏳ 이동 중...' : '🛋️ 대기방으로 돌아가기'}
+                {returning ? '이동하는 중...' : '대기방으로'}
               </button>
             </>
           ) : (
             <div className="waiting-rematch glass-panel">
-              <span>🕐 방장이 다음 행동을 선택하는 중...</span>
+              <span>방장이 다음 행동을 선택하는 중입니다</span>
             </div>
           )}
           <button className="btn btn-secondary action-btn" onClick={backToTitle}>
-            🏠 메인으로 나가기
+            메인으로 나가기
           </button>
         </div>
 
