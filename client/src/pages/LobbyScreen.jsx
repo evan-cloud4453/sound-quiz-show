@@ -11,7 +11,7 @@ function getAvatar(id) {
 }
 
 export default function LobbyScreen() {
-  const { state, startGame, backToTitle, sendChat, toggleReady, transferHost, updateSettings } = useGame()
+  const { state, startGame, backToTitle, sendChat, toggleReady, transferHost, kickPlayer, updateSettings } = useGame()
   const {
     roomCode, players, hostId, myId, nickname,
     availableCategories, chatMessages,
@@ -27,6 +27,11 @@ export default function LobbyScreen() {
   const [copied, setCopied]   = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
   const [starting, setStarting] = useState(false)
+
+  // ── 방장 관리 모달 (방장 넘기기 / 강퇴) ──
+  const [showManage, setShowManage] = useState(false)
+  // 확인 모달: { type: 'transfer' | 'kick', player }
+  const [confirmAction, setConfirmAction] = useState(null)
 
   // ── 채팅 ──
   const [chatInput, setChatInput] = useState('')
@@ -86,6 +91,15 @@ export default function LobbyScreen() {
   }
   const handleChatKey = (e) => { if (e.key === 'Enter') handleSendChat() }
 
+  // 방장 관리: 확인 모달에서 '확인' 누르면 실제 실행
+  const runConfirm = () => {
+    if (!confirmAction) return
+    if (confirmAction.type === 'transfer') transferHost(confirmAction.player.id)
+    else if (confirmAction.type === 'kick') kickPlayer(confirmAction.player.id)
+    setConfirmAction(null)
+    setShowManage(false)
+  }
+
   const catSummary = selectedCats.length === 0
     ? '전체 주제'
     : `${selectedCats.length}개 주제`
@@ -106,38 +120,49 @@ export default function LobbyScreen() {
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 8 }}>
               <button className="copy-btn" style={{ fontSize: '0.75rem', padding: '5px 12px' }} onClick={copyCode}>
-                {copied ? '✅ 복사됨' : '📋 코드 복사'}
+                {copied ? '복사됨' : '복사'}
               </button>
-              <button className="copy-btn" style={{ fontSize: '0.75rem', padding: '5px 12px' }} onClick={copyLink}>
-                {linkCopied ? '✅ 복사됨' : '🔗 링크 복사'}
+              <button className="copy-btn" style={{ fontSize: '0.75rem', padding: '5px 12px' }} onClick={copyLink} title="공유 링크 복사">
+                {linkCopied ? '복사됨' : '🔗'}
               </button>
             </div>
-            <p className="room-code-hint">코드 또는 링크를 친구에게 공유하세요!</p>
+            <p className="room-code-hint">코드 또는 링크를 친구에게 공유하세요</p>
           </div>
         </div>
 
         <div className="lobby-body">
           {/* ★ 게임 정보 요약 (박스 없이) + 설정 버튼 */}
           <div className="setting-info animate-fadeInUp" style={{ justifyContent: 'center', animationDelay: '0.05s' }}>
-            <div className="info-chip">🏆 목표 {targetScore}점</div>
-            <div className="info-chip">🎵 {roundCount}라운드</div>
-            {currentIsHost && <div className="info-chip">📚 {catSummary}</div>}
-            <div className="info-chip">⏱️ 라운드당 15초</div>
+            <div className="info-chip">목표 {targetScore}점</div>
+            <div className="info-chip">{roundCount}라운드</div>
+            {currentIsHost && <div className="info-chip">{catSummary}</div>}
+            <div className="info-chip">라운드당 15초</div>
           </div>
           {currentIsHost && (
-            <button
-              className="btn btn-secondary animate-fadeInUp"
-              style={{ animationDelay: '0.08s' }}
-              onClick={() => setShowSettings(true)}
-            >
-              ⚙️ 게임 설정
-            </button>
+            <div className="animate-fadeInUp" style={{ display: 'flex', gap: 10, animationDelay: '0.08s' }}>
+              <button
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => setShowSettings(true)}
+              >
+                설정
+              </button>
+              {players.length > 1 && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ flex: 1 }}
+                  onClick={() => setShowManage(true)}
+                >
+                  방장 넘기기
+                </button>
+              )}
+            </div>
           )}
 
           {/* Players list */}
           <div className="glass-panel players-panel animate-fadeInUp" style={{ animationDelay: '0.1s' }}>
             <div className="panel-title">
-              <span>👥 플레이어 ({players.length}/8)</span>
+              <span>플레이어 ({players.length}/8)</span>
               <div className="players-count-bar">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <div key={i} className={`count-pip ${i < players.length ? 'filled' : ''}`} />
@@ -158,26 +183,12 @@ export default function LobbyScreen() {
                       {p.nickname}
                       {(p.id === myId || p.nickname === nickname) && <span className="me-tag">나</span>}
                     </span>
-                    {p.id === hostId && <span className="host-tag">👑 방장</span>}
+                    {p.id === hostId && <span className="host-tag">방장</span>}
                   </div>
-
-                  {/* 방장이면 다른 플레이어에게 위임 버튼 */}
-                  {currentIsHost && p.id !== hostId && (
-                    <button
-                      className="copy-btn"
-                      title="방장 위임"
-                      onClick={() => {
-                        if (window.confirm(`${p.nickname}님에게 방장을 넘기시겠어요?`)) transferHost(p.id)
-                      }}
-                      style={{ marginRight: 6 }}
-                    >
-                      👑 위임
-                    </button>
-                  )}
 
                   {/* 준비 상태 표시 */}
                   <div className={`ready-indicator ${p.id === hostId ? 'host' : (p.isReady ? 'host' : 'waiting')}`}>
-                    {p.id === hostId ? '방장' : (p.isReady ? '✅ 준비완료' : '대기 중')}
+                    {p.id === hostId ? '방장' : (p.isReady ? '준비완료' : '대기 중')}
                   </div>
                 </div>
               ))}
@@ -185,7 +196,7 @@ export default function LobbyScreen() {
               {players.length < 8 && Array.from({ length: Math.min(2, 8 - players.length) }).map((_, i) => (
                 <div key={`empty-${i}`} className="player-row empty">
                   <div className="player-avatar-sm empty-avatar">+</div>
-                  <span className="empty-label">친구를 기다리는 중...</span>
+                  <span className="empty-label">친구를 기다리는 중</span>
                 </div>
               ))}
             </div>
@@ -193,7 +204,7 @@ export default function LobbyScreen() {
 
           {/* ★ 채팅 패널 (기존 설정란 자리) */}
           <div className="glass-panel animate-fadeInUp" style={{ animationDelay: '0.2s', display: 'flex', flexDirection: 'column', minHeight: 0, padding: 24 }}>
-            <div className="panel-title"><span>💬 채팅</span></div>
+            <div className="panel-title"><span>채팅</span></div>
 
             <div style={{
               flex: 1,
@@ -207,10 +218,28 @@ export default function LobbyScreen() {
             }}>
               {chatMessages.length === 0 && (
                 <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', textAlign: 'center', margin: 'auto' }}>
-                  아직 메시지가 없어요. 첫 인사를 건네보세요! 👋
+                  아직 메시지가 없어요. 첫 인사를 건네보세요
                 </p>
               )}
               {chatMessages.map(m => {
+                // ★ 방 알림(입장/퇴장/방장 위임/설정 변경/강퇴) — 가운데 흐린 텍스트
+                if (m.system) {
+                  return (
+                    <div key={m.id} style={{ alignSelf: 'center', maxWidth: '90%', margin: '2px 0' }}>
+                      <span style={{
+                        display: 'inline-block',
+                        fontSize: '0.74rem',
+                        color: 'var(--text-dim)',
+                        background: 'rgba(255,255,255,0.05)',
+                        padding: '4px 12px',
+                        borderRadius: 999,
+                        textAlign: 'center'
+                      }}>
+                        {m.text}
+                      </span>
+                    </div>
+                  )
+                }
                 const mine = m.playerId === myId
                 return (
                   <div key={m.id} style={{
@@ -268,7 +297,7 @@ export default function LobbyScreen() {
             <div className="animate-fadeInUp" style={{ display: 'flex', flexDirection: 'column', gap: 12, animationDelay: '0.3s' }}>
               {!allReady && (
                 <p style={{ textAlign: 'center', color: 'var(--warn, #f59e0b)', fontSize: '0.82rem', margin: 0 }}>
-                  ⏳ 모든 플레이어가 준비완료해야 시작할 수 있어요.
+                  모든 플레이어가 준비완료해야 시작할 수 있어요
                 </p>
               )}
               <button
@@ -276,7 +305,7 @@ export default function LobbyScreen() {
                 onClick={handleStart}
                 disabled={starting || players.length < 1 || !allReady}
               >
-                {starting ? '🚀 게임 시작 중...' : `🚀 게임 시작! (${players.length}명)`}
+                {starting ? '게임 시작 중...' : `게임 시작 (${players.length}명)`}
               </button>
             </div>
           ) : (
@@ -285,10 +314,10 @@ export default function LobbyScreen() {
                 className={`btn btn-lg ${iAmReady ? 'btn-secondary' : 'btn-primary'}`}
                 onClick={toggleReady}
               >
-                {iAmReady ? '✅ 준비완료 (취소하려면 누르세요)' : '🙋 준비완료'}
+                {iAmReady ? '준비완료 (취소하려면 누르세요)' : '준비완료'}
               </button>
               <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.82rem', margin: 0 }}>
-                {iAmReady ? '방장이 게임을 시작하길 기다리는 중...' : '준비되면 위 버튼을 눌러주세요!'}
+                {iAmReady ? '방장이 게임을 시작하길 기다리는 중' : '준비되면 위 버튼을 눌러주세요'}
               </p>
             </div>
           )}
@@ -311,8 +340,8 @@ export default function LobbyScreen() {
             style={{ width: '100%', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto', padding: 24 }}
           >
             <div className="panel-title" style={{ marginBottom: 16 }}>
-              <span>⚙️ 게임 설정</span>
-              <button className="copy-btn" onClick={closeSettings}>✕ 닫기</button>
+              <span>게임 설정</span>
+              <button className="copy-btn" onClick={closeSettings}>닫기</button>
             </div>
 
             {/* 목표 점수 */}
@@ -432,8 +461,113 @@ export default function LobbyScreen() {
               onClick={closeSettings}
               style={{ marginTop: 16 }}
             >
-              ✅ 설정 완료
+              설정 완료
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 방장 관리 모달 — 방장 넘기기 / 강퇴 */}
+      {showManage && currentIsHost && (
+        <div
+          onClick={() => setShowManage(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(4,5,15,0.7)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+          }}
+        >
+          <div
+            className="glass-panel animate-scaleIn"
+            onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 460, maxHeight: '80vh', overflowY: 'auto', padding: 24 }}
+          >
+            <div className="panel-title" style={{ marginBottom: 16 }}>
+              <span>플레이어 관리</span>
+              <button className="copy-btn" onClick={() => setShowManage(false)}>닫기</button>
+            </div>
+
+            <p style={{ color: 'var(--text-dim)', fontSize: '0.82rem', margin: '0 0 14px' }}>
+              방장을 넘기거나 플레이어를 내보낼 수 있습니다.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {players.filter(p => p.id !== hostId).length === 0 && (
+                <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', textAlign: 'center', padding: '16px 0' }}>
+                  관리할 다른 플레이어가 없습니다.
+                </p>
+              )}
+              {players.filter(p => p.id !== hostId).map(p => (
+                <div
+                  key={p.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 12px', borderRadius: 10,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)'
+                  }}
+                >
+                  <div className="player-avatar-sm">{getAvatar(p.id)}</div>
+                  <span style={{ flex: 1, fontSize: '0.92rem' }}>{p.nickname}</span>
+                  <button
+                    className="copy-btn"
+                    onClick={() => setConfirmAction({ type: 'transfer', player: p })}
+                  >
+                    방장 넘기기
+                  </button>
+                  <button
+                    className="copy-btn"
+                    style={{ color: '#fca5a5', borderColor: 'rgba(248,113,113,0.4)' }}
+                    onClick={() => setConfirmAction({ type: 'kick', player: p })}
+                  >
+                    강퇴
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 확인 모달 — 방장 넘기기 / 강퇴 공통 (window.confirm 대체) */}
+      {confirmAction && (
+        <div
+          onClick={() => setConfirmAction(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1100,
+            background: 'rgba(4,5,15,0.78)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+          }}
+        >
+          <div
+            className="glass-panel animate-scaleIn"
+            onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 360, padding: 24, textAlign: 'center' }}
+          >
+            <h3 style={{ margin: '0 0 10px', fontSize: '1.1rem' }}>
+              {confirmAction.type === 'transfer' ? '방장 넘기기' : '플레이어 강퇴'}
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: '0 0 20px', lineHeight: 1.5 }}>
+              {confirmAction.type === 'transfer'
+                ? <><b>{confirmAction.player.nickname}</b>님에게 방장을 넘기시겠어요?</>
+                : <><b>{confirmAction.player.nickname}</b>님을 방에서 내보내시겠어요?</>}
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => setConfirmAction(null)}
+              >
+                취소
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1, ...(confirmAction.type === 'kick' ? { background: 'linear-gradient(135deg,#ef4444,#f87171)' } : {}) }}
+                onClick={runConfirm}
+              >
+                {confirmAction.type === 'transfer' ? '넘기기' : '강퇴'}
+              </button>
+            </div>
           </div>
         </div>
       )}
