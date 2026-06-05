@@ -36,6 +36,8 @@ const initialState = {
   youtubeEnd: 0,
   timeLimit: 15,
   roundActive: false,
+  isBonus: false,        // ★ 보너스 라운드 여부
+  pointValue: 1,         // ★ 이번 라운드 배점
 
   // result state
   lastResult: null,
@@ -116,6 +118,8 @@ function reducer(state, action) {
         youtubeEnd: action.data.youtubeEnd || 0,
         timeLimit: action.data.timeLimit,
         roundActive: true,
+        isBonus: !!action.data.isBonus,
+        pointValue: action.data.pointValue || 1,
         lastResult: null
       }
     case 'HINT_REVEALED':
@@ -185,8 +189,8 @@ export function GameProvider({ children }) {
     return () => unsubs.forEach(u => u())
   }, [on])
 
-  const joinRoom = useCallback((nickname, roomCode) => {
-    emit('join_room', { nickname, roomCode: roomCode || undefined }, (res) => {
+  const joinRoom = useCallback((nickname, roomCode, avatar) => {
+    emit('join_room', { nickname, roomCode: roomCode || undefined, avatar }, (res) => {
       if (res.error) {
         alert(res.error)
         return
