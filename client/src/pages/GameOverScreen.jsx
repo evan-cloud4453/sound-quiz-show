@@ -102,7 +102,7 @@ export default function GameOverScreen() {
                   <span className="final-rank">
                     {i < 3 ? RANK_MEDALS[i] : `${i + 1}위`}
                   </span>
-                  <span className="final-avatar">{getAvatar(p.id)}</span>
+                  <span className="final-avatar">{p.avatar || getAvatar(p.id)}</span>
                   <span className="final-name">
                     {p.nickname}
                     {isMe && <span className="me-chip">나</span>}
