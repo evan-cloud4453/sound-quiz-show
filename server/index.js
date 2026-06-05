@@ -663,7 +663,7 @@ function endGame(room) {
   // ① 점수 초기화 전에 finalScores 캡처
   const finalScores = [...room.players]
     .sort((a, b) => b.score - a.score)
-    .map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+    .map(p => ({ id: p.id, nickname: p.nickname, avatar: p.avatar, score: p.score }))
 
   // ② 승리/무승부 판정
   let winner = null
