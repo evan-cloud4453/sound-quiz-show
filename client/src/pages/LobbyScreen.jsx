@@ -53,11 +53,14 @@ export default function LobbyScreen() {
   // ★ 공유 링크 복사: ?room=코드 형태. 링크로 접속하면 참가 모드로 코드 자동 입력됨
   const shareLink = `${window.location.origin}${window.location.pathname}?room=${roomCode}`
   const copyLink = () => {
-    navigator.clipboard.writeText(shareLink).then(() => {
-      setLinkCopied(true)
-      setTimeout(() => setLinkCopied(false), 2000)
-    })
-  }
+  const base = `${window.location.origin}${window.location.pathname}?room=${roomCode}`
+  // 카카오톡 인앱 브라우저에서 열릴 때만 외부 브라우저 유도 파라미터 추가
+  const isKakao = /KAKAOTALK/i.test(navigator.userAgent)
+  const link = isKakao ? `${base}&openExternalBrowser=1` : base
+  navigator.clipboard?.writeText(link)
+  setLinkCopied(true)
+  setTimeout(() => setLinkCopied(false), 2000)
+}
 
   // ★ 준비 현황: 방장 외 모든 플레이어가 준비되어야 시작 가능
   const others = players.filter(p => p.id !== hostId)
