@@ -1,5 +1,9 @@
 // sever/index.js
 
+const BONUS_PROB     = 0.15   // 보너스 퀴즈 발동 확률
+const BONUS_MAX      = 2      // 게임당 최대 발동 횟수
+const BONUS_MIN_DIFF = 2      // 보너스 대상 최소 난이도
+
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -618,7 +622,7 @@ function startRound(room) {
 
   // ★ 보너스 퀴즈: 난이도 2+ 문제 한정, 게임당 최대 2회, 15% 확률
   const diff = Number(question.difficulty) || 1;
-  const isBonus = room.bonusUsed < 2 && diff >= 2 && Math.random() < 0.15;
+  const isBonus = room.bonusUsed < BONUS_MAX && diff >= BONUS_MIN_DIFF && Math.random() < BONUS_PROB;
   room.currentRoundBonus = isBonus;
   if (isBonus) room.bonusUsed += 1;
 
