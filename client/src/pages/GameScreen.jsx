@@ -432,7 +432,7 @@ export default function GameScreen() {
       if (isBonus) {
         setBonusActive(true)
         setPhaseLabel('보너스 퀴즈!')
-        await delay(400)
+        await delay(200)
         if (sig.aborted) return
         await playAudioFile(BONUS_AUDIO, sig)   // 파일 없으면 즉시 통과
         if (sig.aborted) return
@@ -569,7 +569,7 @@ export default function GameScreen() {
         <div style={{
           position: 'fixed', inset: 0, zIndex: 900, pointerEvents: 'none',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'radial-gradient(circle at 50% 50%, rgba(124,58,237,0.40), rgba(34,211,238,0.20) 45%, rgba(4,5,15,0) 75%)',
+          background: 'radial-gradient(circle at 50% 50%, rgba(124,58,237,0.45), rgba(34,211,238,0.22) 40%, rgba(2,2,10,0.92) 78%)',
           animation: 'bonusPulse 1.1s ease-in-out infinite'
         }}>
           <div style={{ textAlign: 'center', animation: 'bonusPop 0.5s ease-out' }}>
@@ -581,9 +581,6 @@ export default function GameScreen() {
               textShadow: '0 0 40px rgba(124,58,237,0.7)'
             }}>
               BONUS QUIZ
-            </div>
-            <div style={{ marginTop: 10, fontSize: '1.15rem', color: '#e9d5ff', fontWeight: 700 }}>
-              이번 문제는 {pointValue}점!
             </div>
           </div>
           <style>{`
