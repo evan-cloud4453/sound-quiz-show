@@ -86,7 +86,7 @@ const CATEGORY_AUDIO = {
   '나라': '/sounds/categories/나라.mp3',
   '언어': '/sounds/categories/언어.mp3',
   '춤의종류': '/sounds/categories/춤의종류.mp3',
-    '가수': '/sounds/categories/가수.mp3',
+  '가수': '/sounds/categories/가수.mp3',
   '게임': '/sounds/categories/게임.mp3',
   '군가': '/sounds/categories/군가.mp3',
   '브랜드': '/sounds/categories/브랜드.mp3',
