@@ -127,6 +127,7 @@ function getRoomState(room) {
     hostId:        room.hostId,
     players:       room.players.map(p => ({
       id: p.id, nickname: p.nickname,
+      avatar: p.avatar,                // ★ 아바타 전달
       score: p.score, isReady: p.isReady,
       isHost: p.id === room.hostId
     })),
@@ -182,7 +183,7 @@ function startRoundTimer(room) {
 io.on('connection', (socket) => {
   console.log(`[접속] ${socket.id}`);
 
-  socket.on('join_room', ({ nickname, roomCode }, cb) => {
+  socket.on('join_room', ({ nickname, roomCode, avatar }, cb) => {
     try {
       let room;
       let isNewRoom = false;
@@ -210,7 +211,9 @@ io.on('connection', (socket) => {
           fallbackTimer:        null,
           answeredThisRound:    false,
           firstCorrectPlayerId: null,
-          musicStartedSockets:  new Set()
+          musicStartedSockets:  new Set(),
+          bonusUsed:            0,          // ★ 게임당 보너스 사용 횟수
+          currentRoundBonus:    false       // ★ 이번 라운드 보너스 여부
         };
         rooms.set(code, room);
         isNewRoom = true;
@@ -219,6 +222,7 @@ io.on('connection', (socket) => {
       room.players.push({
         id: socket.id,
         nickname: nickname || `플레이어${room.players.length + 1}`,
+        avatar: avatar || null,          // ★ 사용자가 고른 아바타
         score: 0, isReady: false,
         isAudioUnlocked: false
       });
@@ -260,6 +264,8 @@ io.on('connection', (socket) => {
 
       room.status             = 'PLAYING';
       room.currentRound       = 0;
+      room.bonusUsed          = 0;        // ★ 보너스 카운터 초기화
+      room.currentRoundBonus  = false;
       room.targetScore        = Number(targetScore) || 5;
       room.roundCount         = count;
       room.selectedCategories = Array.isArray(categories) ? categories : [];
@@ -352,13 +358,16 @@ io.on('connection', (socket) => {
         room.firstCorrectPlayerId = socket.id;
         clearRoomTimers(room);
 
-        player.score += 1;
+        const gained = room.currentRoundBonus ? 2 : 1;   // ★ 보너스면 2점
+        player.score += gained;
         io.to(room.code).emit('room_update', getRoomState(room));
         io.to(room.code).emit('answer_result', {
           correct:        true,
           winnerId:       socket.id,
           winnerNickname: player.nickname,
           answer:         question.answers[0],
+          points:         gained,                          // ★ 획득 점수
+          isBonus:        room.currentRoundBonus,           // ★ 보너스 여부
           scores:         room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
         });
 
@@ -455,11 +464,25 @@ io.on('connection', (socket) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.hostId !== socket.id || room.status !== 'WAITING') return;
-      if (targetScore != null) room.targetScore = Number(targetScore) || room.targetScore;
-      if (roundCount  != null) room.roundCount  = Math.max(1, Math.min(Number(roundCount) || room.roundCount, 30));
-      if (Array.isArray(categories)) room.selectedCategories = categories;
+
+      let changed = false;
+      if (targetScore != null) {
+        const v = Number(targetScore) || room.targetScore;
+        if (v !== room.targetScore) { room.targetScore = v; changed = true; }
+      }
+      if (roundCount != null) {
+        const v = Math.max(1, Math.min(Number(roundCount) || room.roundCount, 30));
+        if (v !== room.roundCount) { room.roundCount = v; changed = true; }
+      }
+      if (Array.isArray(categories)) {
+        const prev = (room.selectedCategories || []).slice().sort().join('|');
+        const next = categories.slice().sort().join('|');
+        if (prev !== next) { room.selectedCategories = categories; changed = true; }
+      }
+
       io.to(room.code).emit('room_update', getRoomState(room));
-      socket.to(room.code).emit('system_message', { text: '방 설정이 변경되었습니다.' });
+      // ★ 실제로 값이 바뀐 경우에만 알림 (그냥 열었다 닫으면 알림 X)
+      if (changed) socket.to(room.code).emit('system_message', { text: '방 설정이 변경되었습니다.' });
     } catch (e) {
       console.error('update_settings 오류:', e);
     }
@@ -593,6 +616,12 @@ function startRound(room) {
   const question = room.questions[room.currentRound - 1];
   if (!question) return endGame(room);
 
+  // ★ 보너스 퀴즈: 난이도 2+ 문제 한정, 게임당 최대 2회, 15% 확률
+  const diff = Number(question.difficulty) || 1;
+  const isBonus = room.bonusUsed < 2 && diff >= 2 && Math.random() < 0.15;
+  room.currentRoundBonus = isBonus;
+  if (isBonus) room.bonusUsed += 1;
+
   io.to(room.code).emit('round_start', {
     round:        room.currentRound,
     totalRounds:  room.questions.length,
@@ -601,7 +630,9 @@ function startRound(room) {
     youtubeId:    question.youtubeId,
     youtubeStart: question.youtubeStart,
     youtubeEnd:   question.youtubeEnd,
-    timeLimit:    ROUND_TIME_LIMIT
+    timeLimit:    ROUND_TIME_LIMIT,
+    isBonus,                              // ★ 보너스 여부
+    pointValue:   isBonus ? 2 : 1         // ★ 배점
   });
 
   io.to(room.code).emit('room_update', getRoomState(room));
