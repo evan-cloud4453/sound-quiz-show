@@ -28,13 +28,15 @@ export default function TitleScreen() {
 
   // ★ 공유 링크(?room=코드)로 들어오면 자동으로 '참가' 모드 + 코드 채우기
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code = params.get('room')
-    if (code) {
-      setMode('join')
-      setRoomCode(code.toUpperCase().slice(0, 4))
-    }
-  }, [])
+  const params = new URLSearchParams(window.location.search)
+  const code = params.get('room')
+  if (code) {
+    setMode('join')
+    setRoomCode(code.toUpperCase().slice(0, 4))
+    // ★ 읽은 뒤 주소창에서 ?room=... 제거 (새로고침/재진입 시 옛 코드로 꼬이는 문제 방지)
+    window.history.replaceState(null, '', window.location.pathname)
+  }
+}, [])
 
   const pickRandomNickname = () => { setNickname(randomNickname()); setError('') }
 
