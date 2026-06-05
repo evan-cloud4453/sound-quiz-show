@@ -1,6 +1,6 @@
 // sever/index.js
 
-const BONUS_PROB     = 0.15   // 보너스 퀴즈 발동 확률
+const BONUS_PROB     = 0.4   // 보너스 퀴즈 발동 확률
 const BONUS_MAX      = 2      // 게임당 최대 발동 횟수
 const BONUS_MIN_DIFF = 2      // 보너스 대상 최소 난이도
 
