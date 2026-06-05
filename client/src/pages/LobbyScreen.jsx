@@ -153,7 +153,7 @@ export default function LobbyScreen() {
                   style={{ flex: 1 }}
                   onClick={() => setShowManage(true)}
                 >
-                  플레이어 관리
+                  방장 넘기기
                 </button>
               )}
             </div>
@@ -177,7 +177,7 @@ export default function LobbyScreen() {
                   className={`player-row ${p.id === myId || p.nickname === nickname ? 'me' : ''} animate-fadeInUp`}
                   style={{ animationDelay: `${i * 0.08}s` }}
                 >
-                  <div className="player-avatar-sm">{getAvatar(p.id)}</div>
+                  <div className="player-avatar-sm">{p.avatar || getAvatar(p.id)}</div>
                   <div className="player-info">
                     <span className="player-name">
                       {p.nickname}
@@ -251,7 +251,7 @@ export default function LobbyScreen() {
                   }}>
                     {!mine && (
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: 2, paddingLeft: 4 }}>
-                        {getAvatar(m.playerId)} {m.nickname}
+                        {(players.find(pp=>pp.id===m.playerId)?.avatar) || getAvatar(m.playerId)} {m.nickname}
                       </span>
                     )}
                     <span style={{
@@ -305,8 +305,11 @@ export default function LobbyScreen() {
                 onClick={handleStart}
                 disabled={starting || players.length < 1 || !allReady}
               >
-                {starting ? '게임 시작 중...' : `게임 시작 (${players.length}명)`}
+                {starting ? '게임 시작 중...' : '게임 시작'}
               </button>
+              <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.75rem', margin: '2px 0 0' }}>
+                {players.length}명 참가 중
+              </p>
             </div>
           ) : (
             <div className="animate-fadeInUp" style={{ display: 'flex', flexDirection: 'column', gap: 12, animationDelay: '0.3s' }}>
@@ -314,10 +317,10 @@ export default function LobbyScreen() {
                 className={`btn btn-lg ${iAmReady ? 'btn-secondary' : 'btn-primary'}`}
                 onClick={toggleReady}
               >
-                {iAmReady ? '준비완료 (취소하려면 누르세요)' : '준비완료'}
+                {iAmReady ? '준비 취소' : '준비완료'}
               </button>
-              <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.82rem', margin: 0 }}>
-                {iAmReady ? '방장이 게임을 시작하길 기다리는 중' : '준비되면 위 버튼을 눌러주세요'}
+              <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.75rem', margin: '2px 0 0' }}>
+                {iAmReady ? '다시 누르면 준비가 취소됩니다' : '준비되면 위 버튼을 눌러주세요'}
               </p>
             </div>
           )}
@@ -507,7 +510,7 @@ export default function LobbyScreen() {
                     border: '1px solid rgba(255,255,255,0.08)'
                   }}
                 >
-                  <div className="player-avatar-sm">{getAvatar(p.id)}</div>
+                  <div className="player-avatar-sm">{p.avatar || getAvatar(p.id)}</div>
                   <span style={{ flex: 1, fontSize: '0.92rem' }}>{p.nickname}</span>
                   <button
                     className="copy-btn"
