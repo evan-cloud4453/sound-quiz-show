@@ -96,6 +96,7 @@ const CATEGORY_AUDIO = {
 const OPENING_AUDIO = '/sounds/opening.mp3'          // (구버전 호환용, 미사용 가능)
 const INTRO_AUDIO   = '/sounds/opening_intro.mp3'    // 설명 소리 (스킵 대상)
 const GO_AUDIO      = '/sounds/opening_go.mp3'       // 시작 소리 "자, 이제 게임을 시작합니다" (항상 재생)
+const BONUS_AUDIO   = '/sounds/bonus.mp3'            // ★ 보너스 퀴즈 나레이션 (없으면 무음으로 넘어감)
 
 function playAudioFile(src, signal) {
   return new Promise((resolve) => {
@@ -126,6 +127,7 @@ export default function GameScreen() {
     category, hint,
     youtubeId, youtubeStart, youtubeEnd,
     roundActive, lastResult, targetScore,
+    isBonus, pointValue,
     timeLimit: serverTimeLimit,
     autoSkipOpening
   } = state
@@ -134,6 +136,7 @@ export default function GameScreen() {
   const isHost = !!(me?.isHost || (hostId && myId === hostId))
 
   const [soundUnlocked, setSoundUnlocked] = useState(false)
+  const [bonusActive, setBonusActive] = useState(false)   // ★ 보너스 연출 오버레이
   const [isPlaying,     setIsPlaying]     = useState(false)
   const [timerActive,   setTimerActive]   = useState(false)
   const [timerLimit,    setTimerLimit]    = useState(serverTimeLimit || 25)
@@ -384,6 +387,7 @@ export default function GameScreen() {
     setAnswer(''); setSubmitted(false); setFlashWrong(false)
     setIsPlaying(false); setTimerActive(false)
     setShowResult(false); setPlaybackError(false)
+    setBonusActive(false)
     musicStartedRef.current = false
 
     async function runSequence() {
@@ -424,6 +428,18 @@ export default function GameScreen() {
         if (sig.aborted) return
       }
     
+      // 1.5 보너스 퀴즈 연출 (해당 라운드면): 코즈믹 플래시 + 나레이션
+      if (isBonus) {
+        setBonusActive(true)
+        setPhaseLabel('보너스 퀴즈!')
+        await delay(400)
+        if (sig.aborted) return
+        await playAudioFile(BONUS_AUDIO, sig)   // 파일 없으면 즉시 통과
+        if (sig.aborted) return
+        await delay(600)
+        if (sig.aborted) return
+      }
+
       // 2. 주제 안내 MP3 (기계음 제거, 타이밍만 유지)
       const currentCategory = categoryRef.current
       if (currentCategory) {
@@ -457,6 +473,7 @@ export default function GameScreen() {
       }
     
       // 3. 음악 재생 (기존 그대로)
+      setBonusActive(false)
       if (!youtubeId) { emit('skip_round'); return }
       setPhaseLabel('🎧 소리를 들어보세요!')
       await playMusic(youtubeId, youtubeStart, youtubeEnd, sig)
@@ -474,9 +491,10 @@ export default function GameScreen() {
       ac.abort()
       clearInterval(tickRef.current)
       window.speechSynthesis.cancel()
+      setBonusActive(false)
       try { playerRef.current?.stopVideo?.() } catch(e) {}
     }
-  }, [soundUnlocked, roundActive, youtubeId, currentRound, emit, getAudioCtx])
+  }, [soundUnlocked, roundActive, youtubeId, currentRound, isBonus, emit, getAudioCtx])
 
   // 라운드 비활성화 정리
   useEffect(() => {
@@ -545,6 +563,35 @@ export default function GameScreen() {
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
+
+      {/* ★ 보너스 퀴즈 코즈믹 연출 오버레이 */}
+      {bonusActive && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 900, pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'radial-gradient(circle at 50% 50%, rgba(124,58,237,0.40), rgba(34,211,238,0.20) 45%, rgba(4,5,15,0) 75%)',
+          animation: 'bonusPulse 1.1s ease-in-out infinite'
+        }}>
+          <div style={{ textAlign: 'center', animation: 'bonusPop 0.5s ease-out' }}>
+            <div style={{
+              fontSize: '3rem', fontWeight: 900, letterSpacing: '0.12em',
+              background: 'linear-gradient(90deg,#a78bfa,#22d3ee)',
+              WebkitBackgroundClip: 'text', backgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              textShadow: '0 0 40px rgba(124,58,237,0.7)'
+            }}>
+              BONUS QUIZ
+            </div>
+            <div style={{ marginTop: 10, fontSize: '1.15rem', color: '#e9d5ff', fontWeight: 700 }}>
+              이번 문제는 {pointValue}점!
+            </div>
+          </div>
+          <style>{`
+            @keyframes bonusPulse { 0%,100% { opacity:.6 } 50% { opacity:1 } }
+            @keyframes bonusPop { 0% { transform:scale(0.7); opacity:0 } 100% { transform:scale(1); opacity:1 } }
+          `}</style>
+        </div>
+      )}
 
       {/* ★ 나가기 확인 모달 (뒤로가기/실수 방지) */}
       {showLeaveConfirm && (
@@ -640,7 +687,7 @@ export default function GameScreen() {
               return (
                 <div key={p.id} className={`score-row ${isMe?'me':''} ${isWinner?'just-won':''}`}>
                   <span className="rank-num">{i + 1}</span>
-                  <span className="player-ava">{getAvatar(p.id)}</span>
+                  <span className="player-ava">{p.avatar || getAvatar(p.id)}</span>
                   <span className="score-name">
                     {p.nickname}
                     {isMe && <span className="me-badge">나</span>}
@@ -671,6 +718,16 @@ export default function GameScreen() {
           {category && (
             <div className="category-row animate-fadeIn">
               <div className="category-badge">{category}</div>
+              {isBonus && (
+                <div className="category-badge" style={{
+                  marginLeft: 8,
+                  background: 'linear-gradient(90deg, rgba(167,139,250,0.25), rgba(34,211,238,0.25))',
+                  border: '1px solid rgba(167,139,250,0.6)',
+                  color: '#e9d5ff'
+                }}>
+                  배점 {pointValue}점
+                </div>
+              )}
               {hint && <span className="hint-text">힌트: {hint}</span>}
             </div>
           )}
@@ -728,7 +785,7 @@ export default function GameScreen() {
                     onClick={handleSubmit}
                     disabled={!answer.trim() || (submitted && !flashWrong)}
                   >
-                    제출 ↵
+                    제출
                   </button>
                 </div>
                 {submitted && !flashWrong && <p className="submitted-hint">판정 중...</p>}
