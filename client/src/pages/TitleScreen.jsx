@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { useGame } from '../utils/GameContext'
 import './TitleScreen.css'
 
-const AVATARS = ['🚀', '⭐', '🌙', '💫', '🪐', '☄️', '🌟', '🎵']
+// ★ 표시용 아바타 목록 — Lobby/GameOver/GameScreen과 동일 집합으로 통일
+const AVATARS = ['🚀', '⭐', '🌙', '💫', '🪐', '☄️', '🌟', '🎵', '👾', '🛸', '🌌', '🔭']
 
 // 우주 컨셉 랜덤 닉네임 (형용사 + 명사 조합)
 const NICK_ADJ = ['빛나는', '용감한', '신비한', '떠도는', '고요한', '반짝이는', '무중력', '초신성', '은하수', '불타는', '얼어붙은', '머나먼', '광속의', '소용돌이', '잠 못 드는']
@@ -19,7 +20,9 @@ export default function TitleScreen() {
   const [mode, setMode] = useState(null) // null | 'create' | 'join'
   const [nickname, setNickname] = useState('')
   const [roomCode, setRoomCode] = useState('')
-  const [selectedAvatar] = useState(AVATARS[Math.floor(Math.random() * AVATARS.length)])
+  // ★ 아바타를 사용자가 고를 수 있게 state로 (선택값이 서버까지 전달됨)
+  const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[Math.floor(Math.random() * AVATARS.length)])
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -37,11 +40,12 @@ export default function TitleScreen() {
 
   const handleStart = () => {
     const trimmed = nickname.trim()
-    if (!trimmed) { setError('닉네임을 입력해주세요!'); return }
-    if (mode === 'join' && !roomCode.trim()) { setError('방 코드를 입력해주세요!'); return }
+    if (!trimmed) { setError('닉네임을 입력해주세요'); return }
+    if (mode === 'join' && !roomCode.trim()) { setError('방 코드를 입력해주세요'); return }
     setError('')
     setLoading(true)
-    joinRoom(trimmed, mode === 'join' ? roomCode.toUpperCase() : null)
+    // ★ 선택한 아바타를 함께 전달 → 들어간 뒤에도 동일한 아바타로 표시됨
+    joinRoom(trimmed, mode === 'join' ? roomCode.toUpperCase() : null, selectedAvatar)
     setTimeout(() => setLoading(false), 3000)
   }
 
@@ -98,10 +102,55 @@ export default function TitleScreen() {
               <h2>{mode === 'create' ? '새 방 만들기' : '방 참가하기'}</h2>
             </div>
 
+            {/* ★ 아바타 선택: 미리보기를 누르면 그리드가 펼쳐짐 */}
             <div className="avatar-row">
-              <div className="avatar-preview">{selectedAvatar}</div>
-              <p className="avatar-hint">내 아바타</p>
+              <button
+                type="button"
+                className="avatar-preview"
+                onClick={() => setShowAvatarPicker(v => !v)}
+                title="아바타 선택"
+                style={{ cursor: 'pointer', border: 'none', background: 'transparent' }}
+              >
+                {selectedAvatar}
+              </button>
+              <p className="avatar-hint">탭하여 아바타 선택</p>
             </div>
+
+            {showAvatarPicker && (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(6, 1fr)',
+                  gap: 8,
+                  margin: '4px 0 16px',
+                  padding: 10,
+                  borderRadius: 12,
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)'
+                }}
+              >
+                {AVATARS.map(a => (
+                  <button
+                    key={a}
+                    type="button"
+                    onClick={() => { setSelectedAvatar(a); setShowAvatarPicker(false) }}
+                    style={{
+                      fontSize: '1.5rem',
+                      aspectRatio: '1 / 1',
+                      borderRadius: 10,
+                      cursor: 'pointer',
+                      background: a === selectedAvatar ? 'rgba(124,58,237,0.30)' : 'rgba(255,255,255,0.05)',
+                      border: a === selectedAvatar
+                        ? '1px solid rgba(124,58,237,0.7)'
+                        : '1px solid rgba(255,255,255,0.10)',
+                      transition: 'background .15s, border .15s'
+                    }}
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="input-group">
               <label>닉네임</label>
@@ -152,7 +201,7 @@ export default function TitleScreen() {
               </div>
             )}
 
-            {error && <p className="entry-error">⚠️ {error}</p>}
+            {error && <p className="entry-error">{error}</p>}
 
             <button
               className="btn btn-primary btn-lg w-full"
@@ -163,7 +212,7 @@ export default function TitleScreen() {
             </button>
           </div>
         )}
-        
+
       </div>
     </div>
   )
