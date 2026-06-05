@@ -33,7 +33,9 @@ export default function TitleScreen() {
   if (code) {
     setMode('join')
     setRoomCode(code.toUpperCase().slice(0, 4))
-    // ★ 읽은 뒤 주소창에서 ?room=... 제거 (새로고침/재진입 시 옛 코드로 꼬이는 문제 방지)
+  }
+  // ★ room이든 openExternalBrowser든, 쿼리스트링이 있으면 통째로 제거
+  if (window.location.search) {
     window.history.replaceState(null, '', window.location.pathname)
   }
 }, [])
