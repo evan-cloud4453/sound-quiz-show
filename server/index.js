@@ -17,6 +17,7 @@ const server = http.createServer(app);
 const CLIENT_URL       = process.env.CLIENT_URL || 'http://localhost:5173';
 const ROUND_COUNT      = 10;
 const ROUND_TIME_LIMIT = 15; // music_started 수신 후 정답 입력 시간 (초)
+const RECONNECT_GRACE_MS = 120000; // ★ 연결 끊김 후 재접속 유예 시간 (2분). 3분 원하면 180000
 
 const io = new Server(server, {
   cors: {
@@ -133,6 +134,7 @@ function getRoomState(room) {
       id: p.id, nickname: p.nickname,
       avatar: p.avatar,                // ★ 아바타 전달
       score: p.score, isReady: p.isReady,
+      disconnected: !!p.disconnected,  // ★ 연결 끊김(유예중) 표시 → 클라에서 '대기중' 표시
       isHost: p.id === room.hostId
     })),
     status:        room.status,
@@ -187,7 +189,7 @@ function startRoundTimer(room) {
 io.on('connection', (socket) => {
   console.log(`[접속] ${socket.id}`);
 
-  socket.on('join_room', ({ nickname, roomCode, avatar }, cb) => {
+  socket.on('join_room', ({ nickname, roomCode, avatar, pid }, cb) => {
     try {
       let room;
       let isNewRoom = false;
@@ -217,7 +219,10 @@ io.on('connection', (socket) => {
           firstCorrectPlayerId: null,
           musicStartedSockets:  new Set(),
           bonusUsed:            0,          // ★ 게임당 보너스 사용 횟수
-          currentRoundBonus:    false       // ★ 이번 라운드 보너스 여부
+          currentRoundBonus:    false,      // ★ 이번 라운드 보너스 여부
+          phase:                'lobby',    // ★ lobby | game | gameover (재접속 복구용)
+          lastGameOver:         null,       // ★ 마지막 game_over 페이로드 (복구 시 재전송)
+          disconnectTimers:     new Map()   // ★ pid → 유예 타이머
         };
         rooms.set(code, room);
         isNewRoom = true;
@@ -225,15 +230,18 @@ io.on('connection', (socket) => {
 
       room.players.push({
         id: socket.id,
+        pid: pid || socket.id,            // ★ 재접속 식별용 영구 토큰 (없으면 소켓ID)
         nickname: nickname || `플레이어${room.players.length + 1}`,
         avatar: avatar || null,          // ★ 사용자가 고른 아바타
         score: 0, isReady: false,
+        disconnected: false,
         isAudioUnlocked: false
       });
 
       socket.join(room.code);
       socket.data.roomCode = room.code;
       socket.data.nickname = nickname;
+      socket.data.pid = pid || socket.id;
 
       io.to(room.code).emit('room_update', getRoomState(room));
       if (!isNewRoom) {
@@ -243,6 +251,48 @@ io.on('connection', (socket) => {
     } catch (e) {
       console.error(e);
       cb({ error: '서버 오류가 발생했습니다.' });
+    }
+  });
+
+  // ── ★ 재접속 (유예 시간 내) ───────────────────────────────────
+  socket.on('rejoin_room', ({ pid, roomCode } = {}, cb) => {
+    try {
+      if (!pid || !roomCode) return cb?.({ error: 'no-session' });
+      const room = rooms.get(roomCode.toUpperCase());
+      if (!room) return cb?.({ error: 'room-gone' });           // 방이 사라짐
+
+      const player = room.players.find(p => p.pid === pid);
+      if (!player) return cb?.({ error: 'removed' });           // 유예 초과로 이미 제거됨
+
+      // 유예 타이머 취소 + 소켓 재바인딩
+      const t = room.disconnectTimers.get(pid);
+      if (t) { clearTimeout(t); room.disconnectTimers.delete(pid); }
+
+      player.id = socket.id;            // 새 소켓ID로 갱신
+      player.disconnected = false;
+      socket.join(room.code);
+      socket.data.roomCode = room.code;
+      socket.data.pid = pid;
+      socket.data.nickname = player.nickname;
+
+      io.to(room.code).emit('room_update', getRoomState(room));
+      socket.to(room.code).emit('system_message', { text: `${player.nickname}님이 다시 연결되었습니다.` });
+
+      cb?.({ success: true, roomCode: room.code, isHost: room.hostId === socket.id });
+
+      // ★ 현재 단계에 맞는 화면 복구를 이 소켓에만 전송
+      if (room.phase === 'gameover' && room.lastGameOver) {
+        socket.emit('game_over', room.lastGameOver);
+      } else if (room.phase === 'game') {
+        socket.emit('game_started', {
+          totalRounds: room.questions.length,
+          targetScore: room.targetScore,
+          autoSkipOpening: true   // 진행 중 복귀이므로 오프닝 생략, 다음 라운드부터 동기화
+        });
+      }
+    } catch (e) {
+      console.error('rejoin_room 오류:', e);
+      cb?.({ error: 'server-error' });
     }
   });
 
@@ -282,6 +332,7 @@ io.on('connection', (socket) => {
       });
 
       io.to(room.code).emit('room_update', getRoomState(room));
+      room.phase = 'game';                  // ★ 재접속 복구용 단계
       io.to(room.code).emit('game_started', {
         totalRounds: room.questions.length,
         targetScore: room.targetScore,
@@ -517,6 +568,8 @@ io.on('connection', (socket) => {
       room.firstCorrectPlayerId = null;
       room.musicStartedSockets = new Set();
       room.players.forEach(p => { p.score = 0; p.isReady = false; p.isAudioUnlocked = false; });
+      room.phase = 'lobby';          // ★ 복구 단계
+      room.lastGameOver = null;
 
       io.to(room.code).emit('room_update', getRoomState(room));
       io.to(room.code).emit('back_to_lobby'); // 모든 클라이언트를 대기방 화면으로
@@ -533,6 +586,9 @@ io.on('connection', (socket) => {
       if (targetId === room.hostId) return;             // 자기 자신 강퇴 불가
       const target = room.players.find(p => p.id === targetId);
       if (!target) return;
+
+      const gt = room.disconnectTimers.get(target.pid);   // 유예 타이머 있으면 정리
+      if (gt) { clearTimeout(gt); room.disconnectTimers.delete(target.pid); }
 
       room.players = room.players.filter(p => p.id !== targetId);
       room.musicStartedSockets?.delete(targetId);
@@ -584,28 +640,61 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomCode);
     if (!room) return;
 
-    room.players = room.players.filter(p => p.id !== socket.id);
-    room.musicStartedSockets?.delete(socket.id);
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player) return;                 // 이미 제거됨(강퇴/나가기 등)
 
-    if (room.players.length === 0) {
-      clearRoomTimers(room);
-      rooms.delete(roomCode);
-      return;
-    }
+    // ★ 즉시 제거하지 않고 '연결 끊김' 상태로 두고 유예 시간을 준다.
+    player.disconnected = true;
+    const pid = player.pid;
+    const nickname = player.nickname;
 
+    // 방장이 끊기면 접속중인 다른 플레이어에게 즉시 이양 (방 조작 가능 유지)
     if (room.hostId === socket.id) {
-      room.hostId = room.players[0].id;
-      io.to(roomCode).emit('system_message', {
-        text: `${room.players[0].nickname}님이 새로운 방장이 되었습니다.`
-      });
-    } else {
-      io.to(roomCode).emit('system_message', {
-        text: `${socket.data.nickname || '플레이어'}님이 나갔습니다.`
-      });
+      const alive = room.players.find(p => !p.disconnected);
+      if (alive) {
+        room.hostId = alive.id;
+        io.to(roomCode).emit('system_message', { text: `${alive.nickname}님이 새로운 방장이 되었습니다.` });
+      }
     }
 
+    io.to(roomCode).emit('system_message', { text: `${nickname}님의 연결이 끊겼습니다. 잠시 기다립니다...` });
     io.to(roomCode).emit('room_update', getRoomState(room));
-    if (room.status === 'PLAYING' && room.players.length < 1) endGame(room);
+
+    // ★ 유예 타이머: 시간 내 재접속이 없으면 그때 완전히 제거
+    const prev = room.disconnectTimers.get(pid);
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      room.disconnectTimers.delete(pid);
+      const target = room.players.find(p => p.pid === pid);
+      if (!target || !target.disconnected) return;   // 이미 재접속했거나 제거됨
+
+      room.players = room.players.filter(p => p.pid !== pid);
+      room.musicStartedSockets?.delete(target.id);
+
+      if (room.players.length === 0) {
+        clearRoomTimers(room);
+        room.disconnectTimers.forEach(t => clearTimeout(t));
+        rooms.delete(roomCode);
+        return;
+      }
+
+      // 호스트가 아직 떠난 사람으로 남아있으면 재이양
+      if (room.hostId === target.id) {
+        const alive = room.players.find(p => !p.disconnected) || room.players[0];
+        room.hostId = alive.id;
+        io.to(roomCode).emit('system_message', { text: `${alive.nickname}님이 새로운 방장이 되었습니다.` });
+      }
+
+      io.to(roomCode).emit('system_message', { text: `${nickname}님이 퇴장했습니다.` });
+      io.to(roomCode).emit('room_update', getRoomState(room));
+
+      // 게임 중인데 접속자가 한 명도 없으면 종료
+      if (room.status === 'PLAYING' && !room.players.some(p => !p.disconnected)) {
+        endGame(room);
+      }
+    }, RECONNECT_GRACE_MS);
+
+    room.disconnectTimers.set(pid, timer);
   });
 });
 
@@ -684,15 +773,18 @@ function endGame(room) {
   }
 
   // ③ game_over 먼저 emit (점수 초기화 전!)
-  io.to(room.code).emit('game_over', {
+  const gameOverPayload = {
     winner,
     isDraw,
     drawPlayers: isDraw ? finalScores.filter(p => p.score === finalScores[0].score) : [],
     finalScores,
     roomCode: room.code
-  })
+  }
+  room.phase = 'gameover'          // ★ 복구 단계: 이후 재접속자는 결과 화면으로
+  room.lastGameOver = gameOverPayload
+  io.to(room.code).emit('game_over', gameOverPayload)
 
-  // ④ 1.5초 후 방 상태 초기화 (game_over 수신 후에 초기화)
+  // ④ 1.5초 후 방 상태 초기화 (game_over 수신 후에 초기화) — phase는 gameover 유지
   setTimeout(() => {
     room.status = 'WAITING'
     room.currentRound = 0
