@@ -579,6 +579,19 @@ export default function GameScreen() {
   const progressPct   = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
 
   return (
+     {/* 나가기 버튼 (우상단 고정) */}
+      <button
+        onClick={() => setShowLeaveConfirm(true)}
+        style={{
+          position: 'fixed', top: 14, right: 14, zIndex: 500,
+          padding: '8px 14px', borderRadius: 999,
+          border: '1px solid rgba(255,255,255,0.2)',
+          background: 'rgba(255,255,255,0.08)',
+          color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer'
+        }}
+      >
+        나가기
+      </button>
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
 
       {/* ★ 보너스 퀴즈 코즈믹 연출 오버레이 */}
