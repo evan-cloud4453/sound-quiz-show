@@ -26,6 +26,27 @@ export default function TitleScreen() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  // ★ 카카오톡 인앱 브라우저로 열렸으면 크롬/사파리로 강제 탈출
+useEffect(() => {
+    const ua = navigator.userAgent.toLowerCase()
+    if (!ua.includes('kakaotalk')) return
+  
+    const target = window.location.href
+  
+    if (/android/i.test(ua)) {
+      // 안드로이드: 크롬으로 강제 오픈 (intent 스킴)
+      const noScheme = target.replace(/^https?:\/\//, '')
+      window.location.href =
+        `intent://${noScheme}#Intent;scheme=https;package=com.android.chrome;end`
+    } else {
+      // iOS: openExternalBrowser 파라미터로 사파리 유도
+      if (!window.location.search.includes('openExternalBrowser')) {
+        const sep = window.location.search ? '&' : '?'
+        window.location.replace(`${target}${sep}openExternalBrowser=1`)
+      }
+    }
+  }, [])
+
   // ★ 공유 링크(?room=코드)로 들어오면 자동으로 '참가' 모드 + 코드 채우기
   useEffect(() => {
   const params = new URLSearchParams(window.location.search)
