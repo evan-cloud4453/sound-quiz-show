@@ -432,10 +432,16 @@ export default function GameScreen() {
       if (isBonus) {
         setBonusActive(true)
         setPhaseLabel('보너스 퀴즈!')
-        playAudioFile(BONUS_AUDIO, sig)   // ★ await 제거 — 음성은 백그라운드로 재생
-        await delay(2000)                 // ★ 오버레이는 딱 2초만
+      
+        // 오버레이 문구는 2초 뒤 자동으로 닫기 (음성과 별개)
+        const hideTimer = setTimeout(() => setBonusActive(false), 2000)
+      
+        // 나레이션은 끝까지 재생 → 끝나야 다음(주제 안내)으로 진행
+        await playAudioFile(BONUS_AUDIO, sig)
+      
+        clearTimeout(hideTimer)
+        setBonusActive(false)
         if (sig.aborted) return
-        setBonusActive(false)             // ★ 2초 뒤 오버레이 닫기
       }
 
       // 2. 주제 안내 MP3 (기계음 제거, 타이밍만 유지)
