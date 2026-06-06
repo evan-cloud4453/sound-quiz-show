@@ -7,6 +7,20 @@ import { io } from 'socket.io-client'
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'
 
+// ★ 재접속 식별용 영구 토큰 (브라우저별 1회 생성, localStorage 보관)
+function getPid() {
+  try {
+    let pid = localStorage.getItem('sqs_pid')
+    if (!pid) {
+      pid = 'p_' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+      localStorage.setItem('sqs_pid', pid)
+    }
+    return pid
+  } catch (e) {
+    return 'p_' + Math.random().toString(36).slice(2)
+  }
+}
+
 // 소켓 인스턴스를 모듈 레벨 싱글톤으로 관리
 // (React StrictMode 이중 마운트에서 소켓이 두 개 생기는 문제 방지)
 let globalSocket = null
@@ -109,6 +123,7 @@ export function useSocket() {
     emit,
     on,
     connected,
-    socketId: globalSocket?.id
+    socketId: globalSocket?.id,
+    pid: getPid()
   }
 }
