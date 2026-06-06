@@ -1,7 +1,13 @@
-import React, { createContext, useContext, useReducer, useCallback, useEffect } from 'react'
+import React, { createContext, useContext, useReducer, useCallback, useEffect, useRef } from 'react'
 import { useSocket } from '../hooks/useSocket'
 
 const GameContext = createContext(null)
+
+// ★ 재접속 세션 (브라우저 종료/백그라운드 후 복귀용)
+const SESSION_KEY = 'sqs_session'
+function saveSession(s) { try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)) } catch (e) {} }
+function loadSession()  { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null') } catch (e) { return null } }
+function clearSession() { try { localStorage.removeItem(SESSION_KEY) } catch (e) {} }
 
 const initialState = {
   screen: 'title',       // title | lobby | game | gameover
@@ -43,6 +49,8 @@ const initialState = {
   lastResult: null,
   winner: null,
   finalScores: [],
+
+  connectionLost: false,   // ★ false | { removed: boolean } — 연결 끊김 오버레이
 
   systemMsg: null
 }
@@ -146,6 +154,10 @@ function reducer(state, action) {
       return { ...state, systemMsg: action.text }
     case 'CLEAR_SYSTEM_MSG':
       return { ...state, systemMsg: null }
+    case 'SET_CONNECTION_LOST':
+      return { ...state, connectionLost: { removed: !!action.removed } }
+    case 'CLEAR_CONNECTION_LOST':
+      return { ...state, connectionLost: false }
     case 'RESET':
       return { ...initialState }
     default:
@@ -155,13 +167,48 @@ function reducer(state, action) {
 
 export function GameProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
-  const { emit, on, connected, socketId } = useSocket()
+  const { emit, on, connected, socketId, pid } = useSocket()
 
   // ★ 내 소켓 ID를 myId로 저장 (서버의 hostId/플레이어 id와 동일 체계).
   //   이게 있어야 '내가 방장인지' 판별(myId === hostId)이 정확히 동작한다.
   useEffect(() => {
     if (socketId) dispatch({ type: 'SET_MY_ID', id: socketId })
   }, [socketId, connected])
+
+  // ★ 재연결 감지 → 저장된 세션으로 자동 재입장 시도
+  const prevConnectedRef = useRef(connected)
+  useEffect(() => {
+    const was = prevConnectedRef.current
+    prevConnectedRef.current = connected
+    if (connected && !was) {
+      const s = loadSession()
+      if (s && s.pid && s.roomCode) {
+        emit('rejoin_room', { pid: s.pid, roomCode: s.roomCode }, (res) => {
+          if (res?.success) {
+            dispatch({ type: 'SET_NICKNAME', nickname: s.nickname || '' })
+            dispatch({ type: 'JOINED_ROOM', roomCode: res.roomCode, isHost: res.isHost })
+            dispatch({ type: 'CLEAR_CONNECTION_LOST' })
+            // 서버가 phase에 맞춰 game_started/game_over 를 이 소켓에 보냄 → 화면 자동 복구
+          } else {
+            // removed / room-gone → 더 이상 복구 불가: 세션 종료 + 오버레이(메인 버튼)
+            clearSession()
+            dispatch({ type: 'SET_CONNECTION_LOST', removed: true })
+          }
+        })
+      }
+    }
+  }, [connected, emit])
+
+  // ★ 연결이 끊긴 채 일정 시간 지나면 '연결 끊김' 오버레이 (방에 있었던 경우만)
+  useEffect(() => {
+    if (connected) return
+    const s = loadSession()
+    if (!s) return
+    const t = setTimeout(() => {
+      dispatch({ type: 'SET_CONNECTION_LOST', removed: false })
+    }, 8000)
+    return () => clearTimeout(t)
+  }, [connected])
 
   // Listen to socket events
   useEffect(() => {
@@ -175,6 +222,7 @@ export function GameProvider({ children }) {
       on('chat_message', data => dispatch({ type: 'CHAT_MESSAGE', data })),   // ★ 채팅
       on('back_to_lobby', ()  => dispatch({ type: 'BACK_TO_LOBBY' })),        // ★ 대기방 복귀
       on('kicked', () => {                                                     // ★ 강퇴 당함
+        clearSession()
         dispatch({ type: 'RESET' })
         if (typeof window !== 'undefined') window.alert('방장에 의해 방에서 내보내졌습니다.')
       }),
@@ -190,15 +238,17 @@ export function GameProvider({ children }) {
   }, [on])
 
   const joinRoom = useCallback((nickname, roomCode, avatar) => {
-    emit('join_room', { nickname, roomCode: roomCode || undefined, avatar }, (res) => {
+    emit('join_room', { nickname, roomCode: roomCode || undefined, avatar, pid }, (res) => {
       if (res.error) {
         alert(res.error)
         return
       }
       dispatch({ type: 'SET_NICKNAME', nickname })
       dispatch({ type: 'JOINED_ROOM', roomCode: res.roomCode, isHost: res.isHost })
+      // ★ 재접속용 세션 저장
+      saveSession({ pid, roomCode: res.roomCode, nickname, avatar: avatar || null })
     })
-  }, [emit])
+  }, [emit, pid])
 
   // ★ startGame: 이제 { targetScore, roundCount, categories } 객체를 받는다.
   //   (하위호환: 숫자만 넘어오면 targetScore로 처리)
@@ -274,8 +324,17 @@ export function GameProvider({ children }) {
   // ★ 방 나가기 → 서버에서 방 제거 후 타이틀로 (나간 뒤 알림 받는 버그 방지)
   const backToTitle = useCallback(() => {
     emit('leave_room')
+    clearSession()
     dispatch({ type: 'RESET' })
   }, [emit])
+
+  // ★ 연결 끊김 오버레이의 '메인으로' 버튼 → 세션 종료 후 새로고침(클린 상태)
+  const goMain = useCallback(() => {
+    clearSession()
+    if (typeof window !== 'undefined') {
+      window.location.href = window.location.pathname
+    }
+  }, [])
 
   return (
     <GameContext.Provider value={{
@@ -283,6 +342,7 @@ export function GameProvider({ children }) {
       joinRoom, startGame, submitAnswer,
       sendChat, returnToLobby, backToTitle,
       toggleReady, transferHost, kickPlayer, updateSettings,
+      goMain,
       connected
     }}>
       {children}
