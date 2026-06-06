@@ -86,7 +86,7 @@ const CATEGORY_AUDIO = {
   '나라': '/sounds/categories/나라.mp3',
   '언어': '/sounds/categories/언어.mp3',
   '춤의종류': '/sounds/categories/춤의종류.mp3',
-  '가수': '/sounds/categories/가수.mp3',
+    '가수': '/sounds/categories/가수.mp3',
   '게임': '/sounds/categories/게임.mp3',
   '군가': '/sounds/categories/군가.mp3',
   '브랜드': '/sounds/categories/브랜드.mp3',
@@ -178,6 +178,45 @@ export default function GameScreen() {
     }
     return audioCtxRef.current
   }, [])
+
+  // ─── ★ iOS 대응: 단일 오디오 객체 재사용 ──────────────────────
+  //   매 라운드 new Audio()를 만들면 iOS 사파리가 누적 차단 → 라운드 갈수록 무음.
+  //   언락 시점에 한 번 만든 객체의 src만 바꿔가며 재생한다.
+  const audioElRef = useRef(null)
+  const getAudioEl = useCallback(() => {
+    if (!audioElRef.current) {
+      const a = new Audio()
+      a.preload = 'auto'
+      a.playsInline = true
+      audioElRef.current = a
+    }
+    return audioElRef.current
+  }, [])
+
+  // 공유 객체로 mp3 1개 재생 (파일 없거나 차단되면 즉시 통과)
+  const playFile = useCallback((src, signal) => {
+    return new Promise((resolve) => {
+      if (signal?.aborted) { resolve(); return }
+      const audio = getAudioEl()
+      let done = false
+      const onAbort = () => { try { audio.pause() } catch (e) {} finish() }
+      const finish = () => {
+        if (done) return
+        done = true
+        audio.onended = null
+        audio.onerror = null
+        signal?.removeEventListener?.('abort', onAbort)
+        resolve()
+      }
+      audio.onended = finish
+      audio.onerror = () => { console.warn(`[오디오 재생 실패] ${src}`); finish() }
+      signal?.addEventListener?.('abort', onAbort)
+      try { audio.pause(); audio.currentTime = 0 } catch (e) {}
+      audio.src = src
+      audio.volume = 1.0
+      audio.play().catch(() => { console.warn(`[오디오 재생차단/iOS] ${src}`); finish() })
+    })
+  }, [getAudioEl])
 
   // ─── 뒤로가기 / 새로고침 실수 방지 ──────────────────────────
   // 더미 히스토리 항목을 쌓아 뒤로가기 1회를 흡수하고, 대신 확인 모달을 띄운다.
@@ -306,7 +345,7 @@ export default function GameScreen() {
           startSeconds: start,
           endSeconds: end > start ? end : undefined
         })
-        try { playerRef.current?.unMute?.() } catch(e) {}
+        try { playerRef.current?.unMute?.() } catch(e) {}   // ★ iOS 음소거 잔류 방지
         setTimeout(() => {
           if (signal?.aborted) { safeResolve(); return }
           playerRef.current?.playVideo?.()
@@ -348,41 +387,46 @@ export default function GameScreen() {
     const ctx = getAudioCtx()
     if (ctx?.state === 'suspended') await ctx.resume()
 
-    // HTML5 Audio 언락 (무음 wav 1회 재생)
-    const dummyAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA')
-    dummyAudio.play().catch(() => {})
+    // ★ 공유 오디오 객체를 이 제스처 안에서 1회 깨운다 (이후 src만 바꿔 재생 가능)
+    try {
+      const el = getAudioEl()
+      el.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
+      await el.play().then(() => { el.pause(); el.currentTime = 0 }).catch(() => {})
+    } catch (e) {}
 
-    // AudioContext 무음 버퍼 재생
+    // AudioContext 무음 버퍼 재생 (틱/팡파레용 컨텍스트 활성화)
     if (ctx) {
       await new Promise(resolve => {
-        const buf = ctx.createBuffer(1, 1, 22050)
-        const src = ctx.createBufferSource()
-        src.buffer = buf
-        src.connect(ctx.destination)
-        src.onended = resolve
-        src.start(0)
-        setTimeout(resolve, 300)
+        try {
+          const buf = ctx.createBuffer(1, 1, 22050)
+          const src = ctx.createBufferSource()
+          src.buffer = buf
+          src.connect(ctx.destination)
+          src.onended = resolve
+          src.start(0)
+        } catch (e) {}
+        setTimeout(resolve, 300) // 안전망
       })
     }
 
-    // ★ 핵심: 유튜브를 "이 제스처 안에서" 실제로 재생→정지해 iOS 자동재생 권한 획득
-    //   더미 영상을 음소거로 잠깐 재생하면 이후 라운드 자동재생이 풀린다.
+    // ★ 핵심: 유튜브를 이 제스처 안에서 더미 영상으로 재생→정지해 iOS 자동재생 권한 획득
     try {
       const yt = playerRef.current
       if (yt?.loadVideoById) {
-        yt.mute()                                   // iOS는 음소거 재생만 제스처로 허용
-        yt.loadVideoById({ videoId: 'M7lc1UVf-VE', startSeconds: 0 }) // 아무 공개 영상(워밍업용)
+        yt.mute()
+        yt.loadVideoById({ videoId: 'M7lc1UVf-VE', startSeconds: 0 })
         yt.playVideo()
         await new Promise(r => setTimeout(r, 400))
         yt.stopVideo()
-        yt.unMute()                                 // 실제 라운드에선 소리 나도록 음소거 해제
+        yt.unMute()
       }
-    } catch (e) { /* 워밍업 실패해도 게임은 진행 */ }
+    } catch (e) { /* 워밍업 실패해도 게임 진행 */ }
 
     setSoundUnlocked(true)
     emit('ready_to_start')
     setPhaseLabel('다른 플레이어들을 기다리는 중...')
-  }, [getAudioCtx, emit])
+  }, [getAudioCtx, getAudioEl, emit])
+
 
   // 라운드 시퀀스
   // allReady(서버가 보내지 않는 이벤트) 대신 soundUnlocked로 게이트.
@@ -405,6 +449,8 @@ export default function GameScreen() {
 
     async function runSequence() {
       const ctx = getAudioCtx()
+      // ★ 매 라운드 컨텍스트 재활성화 (iOS는 라운드 중간에 다시 suspended 됨 → 점점 무음)
+      if (ctx?.state === 'suspended') { try { await ctx.resume() } catch (e) {} }
     
       // 1. 오프닝 (1회): 설명(INTRO, 스킵 가능) → 시작소리(GO, 항상 재생)
       //    - 스킵 버튼/이벤트는 INTRO만 끊고 곧장 GO로 넘어간다 → 모두가 시작을 인지
@@ -422,10 +468,16 @@ export default function GameScreen() {
         const autoSkip = autoSkipRef.current  // 재시작이면 true → INTRO 생략
         if (!autoSkip) {
           setOpeningPhase(true)               // 스킵 버튼 노출 (INTRO 동안만)
-          setPhaseLabel('🎙️ 게임 설명 중...')
+          setPhaseLabel('게임 설명 중...')
           await delay(500)
           if (!sig.aborted && !introAc.signal.aborted) {
-            await playAudioFile(INTRO_AUDIO, introAc.signal)
+            // ★ INTRO 오디오가 iOS에서 즉시 실패해도 스킵 버튼이 최소 3초는 보이도록
+            //   최소 노출 시간을 함께 기다린다(스킵하면 introAc.abort로 즉시 종료).
+            const minShow = new Promise(r => {
+              const t = setTimeout(r, 3000)
+              introAc.signal.addEventListener('abort', () => { clearTimeout(t); r() })
+            })
+            await Promise.all([ playFile(INTRO_AUDIO, introAc.signal), minShow ])
           }
           setOpeningPhase(false)
         }
@@ -435,7 +487,7 @@ export default function GameScreen() {
 
         // GO(시작 소리)는 스킵과 무관하게 항상 재생 (라운드 전체 중단 시에만 멈춤)
         setPhaseLabel('자, 이제 게임을 시작합니다!')
-        await playAudioFile(GO_AUDIO, sig)
+        await playFile(GO_AUDIO, sig)
         if (sig.aborted) return
         await delay(300)
         if (sig.aborted) return
@@ -445,14 +497,8 @@ export default function GameScreen() {
       if (isBonus) {
         setBonusActive(true)
         setPhaseLabel('보너스 퀴즈!')
-      
-        // 오버레이 문구는 2초 뒤 자동으로 닫기 (음성과 별개)
-        const hideTimer = setTimeout(() => setBonusActive(false), 2000)
-      
-        // 나레이션은 끝까지 재생 → 끝나야 다음(주제 안내)으로 진행
-        await playAudioFile(BONUS_AUDIO, sig)
-      
-        clearTimeout(hideTimer)
+        // 나레이션을 끝까지 재생하되, 파일이 없거나 막혀도 최소 2초는 유지한 뒤 진행
+        await Promise.all([ playFile(BONUS_AUDIO, sig), delay(2000) ])
         setBonusActive(false)
         if (sig.aborted) return
       }
@@ -471,7 +517,7 @@ export default function GameScreen() {
           // 재생 시작 시간 기록
           const startTime = Date.now();
           
-          await playAudioFile(catSrc, sig)
+          await playFile(catSrc, sig)
           if (sig.aborted) return
           
           // 파일이 1초 미만으로 너무 짧게 끝나거나 실패하더라도 흐름을 위해 최소 2.5초는 대기
@@ -511,7 +557,7 @@ export default function GameScreen() {
       setBonusActive(false)
       try { playerRef.current?.stopVideo?.() } catch(e) {}
     }
-  }, [soundUnlocked, roundActive, youtubeId, currentRound, isBonus, emit, getAudioCtx])
+  }, [soundUnlocked, roundActive, youtubeId, currentRound, isBonus, emit, getAudioCtx, playFile])
 
   // 라운드 비활성화 정리
   useEffect(() => {
