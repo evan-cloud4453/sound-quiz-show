@@ -306,6 +306,7 @@ export default function GameScreen() {
           startSeconds: start,
           endSeconds: end > start ? end : undefined
         })
+        try { playerRef.current?.unMute?.() } catch(e) {}
         setTimeout(() => {
           if (signal?.aborted) { safeResolve(); return }
           playerRef.current?.playVideo?.()
@@ -344,32 +345,44 @@ export default function GameScreen() {
 
   // 언락 버튼
   const handleUnlock = useCallback(async () => {
-  const ctx = getAudioCtx()
-  if (ctx?.state === 'suspended') await ctx.resume()
+    const ctx = getAudioCtx()
+    if (ctx?.state === 'suspended') await ctx.resume()
 
-  // ★ 추가: HTML5 Audio 객체 정책 우회를 위한 빈 소리 1회 재생
-  const dummyAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA')
-  dummyAudio.play().catch(() => {}) // 에러가 나도 무시 (언락이 목적)
+    // HTML5 Audio 언락 (무음 wav 1회 재생)
+    const dummyAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA')
+    dummyAudio.play().catch(() => {})
 
-  // ★ AudioContext 완전히 깨울 때까지 대기 (무음 버퍼 재생)
-  await new Promise(resolve => {
-    const buf = ctx.createBuffer(1, 1, 22050)
-    const src = ctx.createBufferSource()
-    src.buffer = buf
-    src.connect(ctx.destination)
-    src.onended = resolve
-    src.start(0)
-    setTimeout(resolve, 300) // 안전망
-  })
+    // AudioContext 무음 버퍼 재생
+    if (ctx) {
+      await new Promise(resolve => {
+        const buf = ctx.createBuffer(1, 1, 22050)
+        const src = ctx.createBufferSource()
+        src.buffer = buf
+        src.connect(ctx.destination)
+        src.onended = resolve
+        src.start(0)
+        setTimeout(resolve, 300)
+      })
+    }
 
-  setSoundUnlocked(true)
-  emit('ready_to_start')
-  setPhaseLabel('다른 플레이어들을 기다리는 중...')
-  if (playerRef.current?.playVideo) {
-    playerRef.current.playVideo()
-    setTimeout(() => playerRef.current?.pauseVideo?.(), 200)
-  }
-}, [getAudioCtx])
+    // ★ 핵심: 유튜브를 "이 제스처 안에서" 실제로 재생→정지해 iOS 자동재생 권한 획득
+    //   더미 영상을 음소거로 잠깐 재생하면 이후 라운드 자동재생이 풀린다.
+    try {
+      const yt = playerRef.current
+      if (yt?.loadVideoById) {
+        yt.mute()                                   // iOS는 음소거 재생만 제스처로 허용
+        yt.loadVideoById({ videoId: 'M7lc1UVf-VE', startSeconds: 0 }) // 아무 공개 영상(워밍업용)
+        yt.playVideo()
+        await new Promise(r => setTimeout(r, 400))
+        yt.stopVideo()
+        yt.unMute()                                 // 실제 라운드에선 소리 나도록 음소거 해제
+      }
+    } catch (e) { /* 워밍업 실패해도 게임은 진행 */ }
+
+    setSoundUnlocked(true)
+    emit('ready_to_start')
+    setPhaseLabel('다른 플레이어들을 기다리는 중...')
+  }, [getAudioCtx, emit])
 
   // 라운드 시퀀스
   // allReady(서버가 보내지 않는 이벤트) 대신 soundUnlocked로 게이트.
