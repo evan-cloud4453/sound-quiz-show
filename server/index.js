@@ -275,6 +275,14 @@ io.on('connection', (socket) => {
       socket.data.pid = pid;
       socket.data.nickname = player.nickname;
 
+      // ★ 살아있는 방장이 없으면(끊겨서 유령 ID로 남거나 혼자 방장이 나갔다 온 경우)
+      //   재접속한 사람을 방장으로 복구
+      const hostAlive = room.players.some(p => p.id === room.hostId && !p.disconnected);
+      if (!hostAlive) {
+        room.hostId = socket.id;
+        io.to(room.code).emit('system_message', { text: `${player.nickname}님이 방장이 되었습니다.` });
+      }
+
       io.to(room.code).emit('room_update', getRoomState(room));
       socket.to(room.code).emit('system_message', { text: `${player.nickname}님이 다시 연결되었습니다.` });
 
