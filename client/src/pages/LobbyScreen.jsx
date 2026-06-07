@@ -175,7 +175,7 @@ export default function LobbyScreen() {
                 <div
                   key={p.id}
                   className={`player-row ${p.id === myId || p.nickname === nickname ? 'me' : ''} animate-fadeInUp`}
-                  style={{ animationDelay: `${i * 0.08}s` }}
+                  style={{ animationDelay: `${i * 0.08}s`, opacity: p.disconnected ? 0.55 : 1 }}
                 >
                   <div className="player-avatar-sm">{p.avatar || getAvatar(p.id)}</div>
                   <div className="player-info">
@@ -186,9 +186,9 @@ export default function LobbyScreen() {
                     {p.id === hostId && <span className="host-tag">방장</span>}
                   </div>
 
-                  {/* 준비 상태 표시 */}
-                  <div className={`ready-indicator ${p.id === hostId ? 'host' : (p.isReady ? 'host' : 'waiting')}`}>
-                    {p.id === hostId ? '방장' : (p.isReady ? '준비완료' : '대기 중')}
+                  {/* 준비 상태 표시 (연결 끊김이면 '대기중') */}
+                  <div className={`ready-indicator ${p.disconnected ? 'waiting' : (p.id === hostId ? 'host' : (p.isReady ? 'host' : 'waiting'))}`}>
+                    {p.disconnected ? '대기중' : (p.id === hostId ? '방장' : (p.isReady ? '준비완료' : '대기 중'))}
                   </div>
                 </div>
               ))}
@@ -511,7 +511,10 @@ export default function LobbyScreen() {
                   }}
                 >
                   <div className="player-avatar-sm">{p.avatar || getAvatar(p.id)}</div>
-                  <span style={{ flex: 1, fontSize: '0.92rem' }}>{p.nickname}</span>
+                  <span style={{ flex: 1, fontSize: '0.92rem' }}>
+                    {p.nickname}
+                    {p.disconnected && <span style={{ marginLeft: 6, fontSize: '0.72rem', color: 'var(--text-dim)' }}>(대기중)</span>}
+                  </span>
                   <button
                     className="copy-btn"
                     onClick={() => setConfirmAction({ type: 'transfer', player: p })}
