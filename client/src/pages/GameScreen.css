@@ -19,7 +19,7 @@
   gap: 16px;
   width: 100%;
   align-items: start;
-}
+}f
 
 /* ── Scoreboard ── */
 .scoreboard-panel {
@@ -448,5 +448,11 @@
   .youtube-sound-panel {
     min-width: 0;
     width: 100%;
+  }
+}
+@media (max-width: 640px) {
+  .game-timer {
+    order: -1;      /* 타이머를 오디오 네모보다 위로 */
+    width: 100%;    /* 한 줄 전체 차지 → 가운데 정렬 */
   }
 }
