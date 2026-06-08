@@ -701,11 +701,7 @@ export default function GameScreen() {
 
         {/* 오디오 네모 + 타이머 (가로 배치, 타이머는 밖 우측 원래 크기) */}
         <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap', justifyContent: 'center' }}>
-          <div className="timer-panel glass-panel" style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
-            order: -1,                 // ★ 타이머를 오디오 네모보다 위로
-            width: '100%'              // ★ 한 줄 전체 차지 → 가운데 정렬
-          }}>
+          <div className="audio-area glass-panel" style={{ flex: '1 1 320px', minWidth: 0 }}>
             <div className="audio-inner">
               {mediaReady
                 ? <WaveformVisualizer isPlaying={isPlaying} />
