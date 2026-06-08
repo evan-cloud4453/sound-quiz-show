@@ -1,9 +1,10 @@
-// client/src/pages/GameScreen.jsx — v4
-// 수정:
-//   1. speakSafe: cancel() 후 150ms 대기 → TTS 묵음 버그 수정
-//   2. timer_start 리스너를 GameContext 없이 직접 소켓에서 수신
-//   3. isTimerRunning 의존 제거, timerActive만 사용
-//   4. window.utterances 누수 방지 (최대 5개 유지)
+// client/src/pages/GameScreen.jsx — v5
+// 변경:
+//   - 좌측 세로 스코어보드 / 우측 타이머 패널 제거
+//   - 음악 네모 아래에 참가자 가로 카드열(4명 한 줄, 초과 시 wrap) — 퀴즈쇼 스탠드 형태
+//   - 타이머는 오디오 네모 우측 위에 작게
+//   - 제출 시 실시간 말풍선(모두에게): 오답=일반색, 정답=초록색, 2.5초 후 사라짐
+//   - 빨간 깜빡임(flashWrong)은 본인 화면에만 (기존 유지)
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGame } from '../utils/GameContext'
@@ -33,23 +34,6 @@ function loadYouTubeApi() {
   return ytApiPromise
 }
 
-// ─── 팡파레 ──────────────────────────────────────────────────
-function playFanfare(ctx) {
-  const t = ctx.currentTime
-  const note = (freq, offset) => {
-    const osc = ctx.createOscillator()
-    const g   = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.value = freq
-    g.gain.setValueAtTime(0.2, t + offset)
-    g.gain.exponentialRampToValueAtTime(0.01, t + offset + 0.15)
-    osc.connect(g); g.connect(ctx.destination)
-    osc.start(t + offset); osc.stop(t + offset + 0.2)
-  }
-  note(523.25, 0); note(659.25, 0.1); note(783.99, 0.2); note(1046.50, 0.3)
-  return 700
-}
-
 // ─── 틱 소리 ─────────────────────────────────────────────────
 function playTick(ctx) {
   const osc = ctx.createOscillator()
@@ -61,9 +45,6 @@ function playTick(ctx) {
   osc.start(); osc.stop(ctx.currentTime + 0.06)
 }
 
-// ─── ★ 수정된 TTS 함수 ────────────────────────────────────────
-// 핵심: cancel() 후 반드시 150ms 대기 후 speak()
-// 이전 utterance 참조 유지 (GC 방지), 최대 5개로 제한
 const CATEGORY_AUDIO = {
   '드라마': '/sounds/categories/드라마.mp3',
   '가요': '/sounds/categories/가요.mp3',
@@ -73,7 +54,7 @@ const CATEGORY_AUDIO = {
   '동요': '/sounds/categories/동요.mp3',
   '클래식음악': '/sounds/categories/클래식음악.mp3',
   '작곡가': '/sounds/categories/작곡가.mp3',
-  '공연예술': '/sounds/categories/공연 예술.mp3', // 실제 파일명에 공백이 있어 경로도 공백 유지
+  '공연예술': '/sounds/categories/공연 예술.mp3',
   '스포츠': '/sounds/categories/스포츠.mp3',
   '운송수단': '/sounds/categories/운송수단.mp3',
   '악기': '/sounds/categories/악기.mp3',
@@ -93,10 +74,9 @@ const CATEGORY_AUDIO = {
   '예능': '/sounds/categories/예능.mp3',
   '유튜버': '/sounds/categories/유튜버.mp3'
 };
-const OPENING_AUDIO = '/sounds/opening.mp3'          // (구버전 호환용, 미사용 가능)
 const INTRO_AUDIO   = '/sounds/opening_intro.mp3'    // 설명 소리 (스킵 대상)
-const GO_AUDIO      = '/sounds/opening_go.mp3'       // 시작 소리 "자, 이제 게임을 시작합니다" (항상 재생)
-const BONUS_AUDIO   = '/sounds/bonus.mp3'            // ★ 보너스 퀴즈 나레이션 (없으면 무음으로 넘어감)
+const GO_AUDIO      = '/sounds/opening_go.mp3'       // 시작 소리 (항상 재생)
+const BONUS_AUDIO   = '/sounds/bonus.mp3'            // 보너스 퀴즈 나레이션
 
 function playAudioFile(src, signal) {
   return new Promise((resolve) => {
@@ -106,7 +86,7 @@ function playAudioFile(src, signal) {
     let done = false
     const finish = () => { if (!done) { done = true; resolve() } }
     audio.onended = finish
-    audio.onerror = () => { console.warn(`[오디오 재생 실패] ${src}`); finish() }  // 파일 없으면 그냥 넘어감
+    audio.onerror = () => { console.warn(`[오디오 재생 실패] ${src}`); finish() }
     signal?.addEventListener('abort', () => { audio.pause(); finish() })
     audio.play().catch(finish)
   })
@@ -136,7 +116,7 @@ export default function GameScreen() {
   const isHost = !!(me?.isHost || (hostId && myId === hostId))
 
   const [soundUnlocked, setSoundUnlocked] = useState(false)
-  const [bonusActive, setBonusActive] = useState(false)   // ★ 보너스 연출 오버레이
+  const [bonusActive, setBonusActive] = useState(false)
   const [isPlaying,     setIsPlaying]     = useState(false)
   const [timerActive,   setTimerActive]   = useState(false)
   const [timerLimit,    setTimerLimit]    = useState(serverTimeLimit || 25)
@@ -147,8 +127,9 @@ export default function GameScreen() {
   const [phaseLabel,    setPhaseLabel]    = useState('접속 대기 중...')
   const [showResult,    setShowResult]    = useState(false)
   const [playbackError, setPlaybackError] = useState(false)
-  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false) // ★ 뒤로가기 방지 모달
-  const [openingPhase,  setOpeningPhase]  = useState(false)       // ★ 오프닝 안내방송 재생 중 여부
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
+  const [openingPhase,  setOpeningPhase]  = useState(false)
+  const [bubbles,       setBubbles]       = useState({})   // ★ { playerId: { text, correct, key } }
 
   const inputRef           = useRef(null)
   const playerRef          = useRef(null)
@@ -157,17 +138,18 @@ export default function GameScreen() {
   const hostElemId         = useRef(`yt-${Math.random().toString(36).slice(2)}`)
   const seqAbortRef        = useRef(null)
   const openingDoneRef     = useRef(false)
-  const skipOpeningRef     = useRef(null)   // ★ 호출하면 오프닝(INTRO)만 즉시 종료
-  const autoSkipRef        = useRef(false)  // ★ 재시작 시 INTRO 자동 스킵 여부
+  const skipOpeningRef     = useRef(null)
+  const autoSkipRef        = useRef(false)
   const musicEndResolveRef = useRef(null)
   const tickRef            = useRef(null)
   const musicStartedRef    = useRef(false)
+  const bubbleTimersRef    = useRef({})   // ★ playerId → 말풍선 제거 타이머
 
   const categoryRef = useRef(category)
   useEffect(() => { categoryRef.current = category }, [category])
 
   useEffect(() => { autoSkipRef.current = !!autoSkipOpening }, [autoSkipOpening])
-  
+
   const targetScoreRef = useRef(targetScore)
   useEffect(() => { targetScoreRef.current = targetScore }, [targetScore])
 
@@ -180,20 +162,15 @@ export default function GameScreen() {
   }, [])
 
   // ─── 뒤로가기 / 새로고침 실수 방지 ──────────────────────────
-  // 더미 히스토리 항목을 쌓아 뒤로가기 1회를 흡수하고, 대신 확인 모달을 띄운다.
   useEffect(() => {
     window.history.pushState({ guard: true }, '')
-
     const onPop = () => {
       setShowLeaveConfirm(true)
-      window.history.pushState({ guard: true }, '') // 가드 재충전
+      window.history.pushState({ guard: true }, '')
     }
     window.addEventListener('popstate', onPop)
-
-    // 새로고침/탭 닫기 → 브라우저 기본 경고창
     const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = '' }
     window.addEventListener('beforeunload', onBeforeUnload)
-
     return () => {
       window.removeEventListener('popstate', onPop)
       window.removeEventListener('beforeunload', onBeforeUnload)
@@ -202,7 +179,7 @@ export default function GameScreen() {
 
   const confirmLeave = useCallback(() => {
     setShowLeaveConfirm(false)
-    backToTitle() // 메인으로. GameScreen 언마운트 → 위 리스너 자동 정리
+    backToTitle()
   }, [backToTitle])
 
   // 한국어 음성 초기화
@@ -217,6 +194,31 @@ export default function GameScreen() {
     init()
     window.speechSynthesis.onvoiceschanged = init
   }, [])
+
+  // ★ 실시간 말풍선 수신 (제출 시 모두에게)
+  useEffect(() => {
+    const unsub = on('player_guess', ({ playerId, text, correct }) => {
+      const key = `${Date.now()}-${Math.random()}`
+      setBubbles(prev => ({ ...prev, [playerId]: { text, correct, key } }))
+      clearTimeout(bubbleTimersRef.current[playerId])
+      bubbleTimersRef.current[playerId] = setTimeout(() => {
+        setBubbles(prev => {
+          if (prev[playerId]?.key !== key) return prev
+          const next = { ...prev }
+          delete next[playerId]
+          return next
+        })
+      }, 2500)
+    })
+    return unsub
+  }, [on])
+
+  // 라운드가 바뀌면 말풍선 초기화
+  useEffect(() => {
+    setBubbles({})
+    Object.values(bubbleTimersRef.current).forEach(clearTimeout)
+    bubbleTimersRef.current = {}
+  }, [currentRound])
 
   // YouTube Player 초기화
   useEffect(() => {
@@ -261,17 +263,16 @@ export default function GameScreen() {
     }
   }
 
-  // ★ timer_start 수신 — useSocket의 on() 직접 사용
+  // timer_start 수신
   useEffect(() => {
     const unsub = on('timer_start', ({ timeLimit }) => {
-      console.log('[timer_start] 수신:', timeLimit)
       setTimerLimit(timeLimit)
       setTimerActive(true)
     })
     return unsub
   }, [on])
 
-  // ★ skip_opening 수신 — 방장이 누르면 서버가 전원에게 브로드캐스트 → 모두 동시에 오프닝 스킵
+  // skip_opening 수신
   useEffect(() => {
     const unsub = on('skip_opening', () => {
       skipOpeningRef.current?.()
@@ -280,12 +281,12 @@ export default function GameScreen() {
   }, [on])
 
   const handleSkipOpening = useCallback(() => {
-    emit('skip_opening') // 서버가 host 여부 검증 후 전원에게 재전송
+    emit('skip_opening')
   }, [emit])
+
   function playMusic(videoId, startSec, endSec, signal) {
     return new Promise((resolve) => {
       if (signal?.aborted) { resolve(); return }
-
       const start   = Number(startSec) || 0
       const end     = Number(endSec)   || 0
       const clipSec = (end > start) ? (end - start) : 10
@@ -297,7 +298,6 @@ export default function GameScreen() {
         musicEndResolveRef.current = null
         resolve()
       }
-
       musicEndResolveRef.current = safeResolve
 
       try {
@@ -329,7 +329,6 @@ export default function GameScreen() {
     })
   }
 
-  // 틱 소리 — 서버가 끊을 때까지 반복
   function playTicksTillEnd(signal) {
     return new Promise(resolve => {
       clearInterval(tickRef.current)
@@ -348,11 +347,9 @@ export default function GameScreen() {
     const ctx = getAudioCtx()
     if (ctx?.state === 'suspended') await ctx.resume()
 
-    // HTML5 Audio 언락 (무음 wav 1회 재생)
     const dummyAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA')
     dummyAudio.play().catch(() => {})
 
-    // AudioContext 무음 버퍼 재생
     if (ctx) {
       await new Promise(resolve => {
         const buf = ctx.createBuffer(1, 1, 22050)
@@ -365,19 +362,17 @@ export default function GameScreen() {
       })
     }
 
-    // ★ 핵심: 유튜브를 "이 제스처 안에서" 실제로 재생→정지해 iOS 자동재생 권한 획득
-    //   더미 영상을 음소거로 잠깐 재생하면 이후 라운드 자동재생이 풀린다.
     try {
       const yt = playerRef.current
       if (yt?.loadVideoById) {
-        yt.mute()                                   // iOS는 음소거 재생만 제스처로 허용
-        yt.loadVideoById({ videoId: 'M7lc1UVf-VE', startSeconds: 0 }) // 아무 공개 영상(워밍업용)
+        yt.mute()
+        yt.loadVideoById({ videoId: 'M7lc1UVf-VE', startSeconds: 0 })
         yt.playVideo()
         await new Promise(r => setTimeout(r, 400))
         yt.stopVideo()
-        yt.unMute()                                 // 실제 라운드에선 소리 나도록 음소거 해제
+        yt.unMute()
       }
-    } catch (e) { /* 워밍업 실패해도 게임은 진행 */ }
+    } catch (e) {}
 
     setSoundUnlocked(true)
     emit('ready_to_start')
@@ -385,9 +380,6 @@ export default function GameScreen() {
   }, [getAudioCtx, emit])
 
   // 라운드 시퀀스
-  // allReady(서버가 보내지 않는 이벤트) 대신 soundUnlocked로 게이트.
-  // 준비 동기화는 서버 ready_to_start 로직이 담당하므로, 클라이언트는
-  // round_start로 roundActive가 켜지면 바로 시퀀스를 돌리면 된다.
   useEffect(() => {
     if (!soundUnlocked || !roundActive) return
 
@@ -405,23 +397,20 @@ export default function GameScreen() {
 
     async function runSequence() {
       const ctx = getAudioCtx()
-    
-      // 1. 오프닝 (1회): 설명(INTRO, 스킵 가능) → 시작소리(GO, 항상 재생)
-      //    - 스킵 버튼/이벤트는 INTRO만 끊고 곧장 GO로 넘어간다 → 모두가 시작을 인지
-      //    - 재시작(rematch)이면 INTRO를 자동 스킵하고 바로 GO부터
+
+      // 1. 오프닝 (1회)
       if (!openingDoneRef.current) {
         openingDoneRef.current = true
         if (ctx?.state === 'suspended') await ctx.resume()
 
-        // INTRO 전용 중단 컨트롤러 (sig와 분리 → 스킵해도 GO/주제/음악은 진행)
         const introAc = new AbortController()
         const onMainAbort = () => introAc.abort()
         sig.addEventListener('abort', onMainAbort)
         skipOpeningRef.current = () => introAc.abort()
 
-        const autoSkip = autoSkipRef.current  // 재시작이면 true → INTRO 생략
+        const autoSkip = autoSkipRef.current
         if (!autoSkip) {
-          setOpeningPhase(true)               // 스킵 버튼 노출 (INTRO 동안만)
+          setOpeningPhase(true)
           setPhaseLabel('🎙️ 게임 설명 중...')
           await delay(500)
           if (!sig.aborted && !introAc.signal.aborted) {
@@ -433,70 +422,52 @@ export default function GameScreen() {
         sig.removeEventListener('abort', onMainAbort)
         if (sig.aborted) return
 
-        // GO(시작 소리)는 스킵과 무관하게 항상 재생 (라운드 전체 중단 시에만 멈춤)
         setPhaseLabel('자, 이제 게임을 시작합니다!')
         await playAudioFile(GO_AUDIO, sig)
         if (sig.aborted) return
         await delay(300)
         if (sig.aborted) return
       }
-    
-      // 1.5 보너스 퀴즈 연출 (해당 라운드면): 코즈믹 플래시 + 나레이션
+
+      // 1.5 보너스 퀴즈 연출
       if (isBonus) {
         setBonusActive(true)
         setPhaseLabel('보너스 퀴즈!')
-      
-        // 오버레이 문구는 2초 뒤 자동으로 닫기 (음성과 별개)
         const hideTimer = setTimeout(() => setBonusActive(false), 2000)
-      
-        // 나레이션은 끝까지 재생 → 끝나야 다음(주제 안내)으로 진행
         await playAudioFile(BONUS_AUDIO, sig)
-      
         clearTimeout(hideTimer)
         setBonusActive(false)
         if (sig.aborted) return
       }
 
-      // 2. 주제 안내 MP3 (기계음 제거, 타이밍만 유지)
+      // 2. 주제 안내 MP3
       const currentCategory = categoryRef.current
       if (currentCategory) {
         setPhaseLabel(`주제: ${currentCategory}`)
-        
-        // ★ NFC 정규화 먼저: macOS 등에서 자소분리(NFD)된 한글도 정상 매칭되게 함.
-        //   (정규화 없이 [^가-힣...] 정규식을 돌리면 NFD 문자열이 통째로 지워짐)
         const cleanCategory = currentCategory.normalize('NFC').replace(/[^가-힣a-zA-Z0-9]/g, '')
         const catSrc = CATEGORY_AUDIO[cleanCategory]
-        
         if (catSrc) {
-          // 재생 시작 시간 기록
-          const startTime = Date.now();
-          
+          const startTime = Date.now()
           await playAudioFile(catSrc, sig)
           if (sig.aborted) return
-          
-          // 파일이 1초 미만으로 너무 짧게 끝나거나 실패하더라도 흐름을 위해 최소 2.5초는 대기
-          const elapsedTime = Date.now() - startTime;
-          if (elapsedTime < 2500) {
-            await delay(2500 - elapsedTime);
-          }
+          const elapsedTime = Date.now() - startTime
+          if (elapsedTime < 2500) await delay(2500 - elapsedTime)
         } else {
-          // 파일이 아예 누락된 경우 기계음 없이 콘솔에 경고만 띄우고 2.5초 대기
           console.warn(`[오디오 누락] '${cleanCategory}' 파일 없음`)
           await delay(2500)
         }
-        
         await delay(500)
         if (sig.aborted) return
       }
-    
-      // 3. 음악 재생 (기존 그대로)
+
+      // 3. 음악 재생
       setBonusActive(false)
       if (!youtubeId) { emit('skip_round'); return }
       setPhaseLabel('🎧 소리를 들어보세요!')
       await playMusic(youtubeId, youtubeStart, youtubeEnd, sig)
       if (sig.aborted) return
-    
-      // 4. 틱 소리 (기존 그대로)
+
+      // 4. 틱 소리
       setIsPlaying(false)
       setPhaseLabel('⌨️ 정답을 입력하세요!')
       await playTicksTillEnd(sig)
@@ -540,24 +511,19 @@ export default function GameScreen() {
     return () => clearTimeout(t)
   }, [lastResult])
 
-  // 개인 오답 시 입력창 잠금 해제 및 빨간 화면(flashWrong) 처리
+  // 개인 오답 처리 (빨간 깜빡임 — 본인 화면만)
   useEffect(() => {
     if (!lastResult) return
-    // 누군가 정답을 맞히거나(winnerId) 시간초과(noWinner)로 라운드가 완전히 끝난 경우는 무시
     if (lastResult.correct || lastResult.winnerId || lastResult.noWinner) return
-    
-    // 만약 틀린 사람이 '나'라면 (서버에서 lastResult에 틀린 사람의 id를 userId 등으로 보내준다고 가정)
-    // (서버가 별도 ID를 안 준다면 본인 화면에서 틀렸다는 응답이 왔을 때로 처리)
-    setFlashWrong(true)   // 빨간 화면 깜빡임
-    setSubmitted(false)   // ★ 핵심: 입력창 잠금 해제
-    setAnswer('')         // 입력창 비우기
-    
-    // 1초 뒤 빨간 화면 깜빡임 효과 제거
+
+    setFlashWrong(true)
+    setSubmitted(false)
+    setAnswer('')
+
     const t = setTimeout(() => {
       setFlashWrong(false)
-      inputRef.current?.focus() // 다시 타자 칠 수 있게 포커스
+      inputRef.current?.focus()
     }, 1000)
-    
     return () => clearTimeout(t)
   }, [lastResult])
 
@@ -575,13 +541,12 @@ export default function GameScreen() {
 
   const handleKey = (e) => { if (e.key === 'Enter') handleSubmit() }
 
-  const sortedPlayers = [...players].sort((a, b) => b.score - a.score)
-  const progressPct   = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
+  const progressPct = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
 
-      {/* ★ 보너스 퀴즈 코즈믹 연출 오버레이 */}
+      {/* 보너스 퀴즈 코즈믹 연출 오버레이 */}
       {bonusActive && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 900, pointerEvents: 'none',
@@ -603,11 +568,12 @@ export default function GameScreen() {
           <style>{`
             @keyframes bonusPulse { 0%,100% { opacity:.6 } 50% { opacity:1 } }
             @keyframes bonusPop { 0% { transform:scale(0.7); opacity:0 } 100% { transform:scale(1); opacity:1 } }
+            @keyframes bubblePop { 0% { transform:translateY(6px) scale(0.8); opacity:0 } 100% { transform:translateY(0) scale(1); opacity:1 } }
           `}</style>
         </div>
       )}
 
-      {/* ★ 나가기 확인 모달 (뒤로가기/실수 방지) */}
+      {/* 나가기 확인 모달 */}
       {showLeaveConfirm && (
         <div
           onClick={() => setShowLeaveConfirm(false)}
@@ -617,11 +583,8 @@ export default function GameScreen() {
             display:'flex', alignItems:'center', justifyContent:'center', padding:16
           }}
         >
-          <div
-            className="glass-panel animate-scaleIn"
-            onClick={e => e.stopPropagation()}
-            style={{ width:'100%', maxWidth:380, padding:24, textAlign:'center' }}
-          >
+          <div className="glass-panel animate-scaleIn" onClick={e => e.stopPropagation()}
+            style={{ width:'100%', maxWidth:380, padding:24, textAlign:'center' }}>
             <h2 style={{ marginBottom:8 }}>게임을 나가시겠어요?</h2>
             <p style={{ color:'var(--text-secondary)', fontSize:'0.9rem', marginBottom:20 }}>
               지금 나가면 진행 중인 게임에서 빠지게 됩니다.
@@ -634,6 +597,22 @@ export default function GameScreen() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 나가기 버튼 (우상단 고정) */}
+      {soundUnlocked && (
+        <button
+          onClick={() => setShowLeaveConfirm(true)}
+          style={{
+            position:'fixed', top:14, right:14, zIndex:500,
+            padding:'8px 14px', borderRadius:999,
+            border:'1px solid rgba(255,255,255,0.2)',
+            background:'rgba(255,255,255,0.08)',
+            color:'var(--text-primary)', fontSize:'0.85rem', cursor:'pointer'
+          }}
+        >
+          나가기
+        </button>
       )}
 
       {/* YouTube 숨김 플레이어 */}
@@ -688,138 +667,183 @@ export default function GameScreen() {
         </div>
       )}
 
-      {/* 게임 레이아웃 */}
-      <div className="game-layout">
+      {/* ── 메인 세로 레이아웃 ── */}
+      <div style={{ maxWidth: 760, margin: '0 auto', padding: '16px 16px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-        {/* 스코어보드 */}
-        <div className="scoreboard-panel glass-panel">
-          <div className="scoreboard-title">스코어보드</div>
-          <div className="score-list">
-            {sortedPlayers.map((p, i) => {
-              const isMe     = p.id === myId || p.nickname === nickname
-              const isWinner = lastResult?.winnerId === p.id
-              return (
-                <div key={p.id} className={`score-row ${isMe?'me':''} ${isWinner?'just-won':''}`}>
-                  <span className="rank-num">{i + 1}</span>
-                  <span className="player-ava">{p.avatar || getAvatar(p.id)}</span>
-                  <span className="score-name">
-                    {p.nickname}
-                    {isMe && <span className="me-badge">나</span>}
-                  </span>
-                  <div className="score-bar-wrap">
-                    <div className="score-bar" style={{ width:`${Math.min((p.score/targetScore)*100,100)}%` }} />
-                  </div>
-                  <span className="score-num">{p.score}</span>
-                  <span className="score-target">/{targetScore}</span>
-                </div>
-              )
-            })}
+        {/* 라운드 진행 */}
+        <div className="round-progress">
+          <div className="round-info">
+            <span className="glow-cyan">라운드 {currentRound || 1}</span>
+            <span style={{ color:'var(--text-secondary)' }}> / {totalRounds}</span>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width:`${progressPct}%` }} />
           </div>
         </div>
 
-        {/* 메인 */}
-        <div className="game-center">
-          <div className="round-progress">
-            <div className="round-info">
-              <span className="glow-cyan">라운드 {currentRound || 1}</span>
-              <span style={{ color:'var(--text-secondary)' }}> / {totalRounds}</span>
-            </div>
-            <div className="progress-track">
-              <div className="progress-fill" style={{ width:`${progressPct}%` }} />
-            </div>
+        {/* 주제 */}
+        {category && (
+          <div className="category-row animate-fadeIn">
+            <div className="category-badge">{category}</div>
+            {isBonus && (
+              <div className="category-badge" style={{
+                marginLeft: 8,
+                background: 'linear-gradient(90deg, rgba(167,139,250,0.25), rgba(34,211,238,0.25))',
+                border: '1px solid rgba(167,139,250,0.6)',
+                color: '#e9d5ff'
+              }}>
+                배점 {pointValue}점
+              </div>
+            )}
+            {hint && <span className="hint-text">힌트: {hint}</span>}
+          </div>
+        )}
+
+        {/* 오디오 네모 (+ 타이머 우측 위) */}
+        <div className="audio-area glass-panel" style={{ position: 'relative' }}>
+          {/* 타이머 (작게, 우측 위) */}
+          <div style={{ position: 'absolute', top: 8, right: 8, transform: 'scale(0.5)', transformOrigin: 'top right' }}>
+            <TimerRing
+              key={`${currentRound}-${timerActive}`}
+              timeLimit={timerLimit}
+              active={timerActive}
+            />
           </div>
 
-          {category && (
-            <div className="category-row animate-fadeIn">
-              <div className="category-badge">{category}</div>
-              {isBonus && (
-                <div className="category-badge" style={{
-                  marginLeft: 8,
-                  background: 'linear-gradient(90deg, rgba(167,139,250,0.25), rgba(34,211,238,0.25))',
-                  border: '1px solid rgba(167,139,250,0.6)',
-                  color: '#e9d5ff'
-                }}>
-                  배점 {pointValue}점
-                </div>
-              )}
-              {hint && <span className="hint-text">힌트: {hint}</span>}
-            </div>
-          )}
-
-          <div className="audio-area glass-panel">
-            <div className="audio-inner">
-              {mediaReady
-                ? <WaveformVisualizer isPlaying={isPlaying} />
-                : <div className="audio-loading"><div className="loading-spinner" /><span>오디오 초기화 중...</span></div>
-              }
-              {playbackError && (
-                <div style={{ color:'#f87171', fontSize:'0.8rem', marginTop:'8px' }}>
-                  ⚠️ 영상을 불러올 수 없습니다. 다음 라운드를 기다려주세요.
-                </div>
-              )}
-              <div className="phase-label">{phaseLabel}</div>
-              {isHost && openingPhase && (
-                <button
-                  onClick={handleSkipOpening}
-                  style={{
-                    marginTop: 10,
-                    padding: '8px 18px',
-                    borderRadius: 999,
-                    border: '1px solid rgba(255,255,255,0.25)',
-                    background: 'rgba(255,255,255,0.08)',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.85rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  설명 건너뛰고 시작
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className={`answer-area glass-panel ${roundActive?'active':''}`}>
-            {roundActive ? (
-              <>
-                <div className="answer-row">
-                  <input
-                    ref={inputRef}
-                    className={`input answer-input ${flashWrong?'wrong':''}`}
-                    placeholder="정답을 입력하세요..."
-                    value={answer}
-                    onChange={e => setAnswer(e.target.value)}
-                    onKeyDown={handleKey}
-                    disabled={submitted && !flashWrong}
-                    maxLength={40}
-                    autoComplete="off"
-                    autoCapitalize="none"
-                  />
-                  <button
-                    className="btn btn-primary submit-btn"
-                    onClick={handleSubmit}
-                    disabled={!answer.trim() || (submitted && !flashWrong)}
-                  >
-                    제출
-                  </button>
-                </div>
-                {submitted && !flashWrong && <p className="submitted-hint">판정 중...</p>}
-                {flashWrong && <p className="wrong-hint">❌ 틀렸습니다! 다시 시도하세요.</p>}
-              </>
-            ) : (
-              <p className="waiting-next">다음 라운드 준비 중...</p>
+          <div className="audio-inner">
+            {mediaReady
+              ? <WaveformVisualizer isPlaying={isPlaying} />
+              : <div className="audio-loading"><div className="loading-spinner" /><span>오디오 초기화 중...</span></div>
+            }
+            {playbackError && (
+              <div style={{ color:'#f87171', fontSize:'0.8rem', marginTop:'8px' }}>
+                ⚠️ 영상을 불러올 수 없습니다. 다음 라운드를 기다려주세요.
+              </div>
+            )}
+            <div className="phase-label">{phaseLabel}</div>
+            {isHost && openingPhase && (
+              <button
+                onClick={handleSkipOpening}
+                style={{
+                  marginTop: 10, padding: '8px 18px', borderRadius: 999,
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  background: 'rgba(255,255,255,0.08)',
+                  color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer'
+                }}
+              >
+                설명 건너뛰고 시작
+              </button>
             )}
           </div>
         </div>
 
-        {/* 타이머 */}
-        <div className="timer-panel glass-panel">
-          <div className="timer-label">남은 시간</div>
-          <TimerRing
-            key={`${currentRound}-${timerActive}`}
-            timeLimit={timerLimit}
-            active={timerActive}
-          />
-          <div className="timer-hint">빠를수록 유리!</div>
+        {/* 정답 입력 */}
+        <div className={`answer-area glass-panel ${roundActive?'active':''}`}>
+          {roundActive ? (
+            <>
+              <div className="answer-row">
+                <input
+                  ref={inputRef}
+                  className={`input answer-input ${flashWrong?'wrong':''}`}
+                  placeholder="정답을 입력하세요..."
+                  value={answer}
+                  onChange={e => setAnswer(e.target.value)}
+                  onKeyDown={handleKey}
+                  disabled={submitted && !flashWrong}
+                  maxLength={40}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                />
+                <button
+                  className="btn btn-primary submit-btn"
+                  onClick={handleSubmit}
+                  disabled={!answer.trim() || (submitted && !flashWrong)}
+                >
+                  제출
+                </button>
+              </div>
+              {submitted && !flashWrong && <p className="submitted-hint">판정 중...</p>}
+              {flashWrong && <p className="wrong-hint">❌ 틀렸습니다! 다시 시도하세요.</p>}
+            </>
+          ) : (
+            <p className="waiting-next">다음 라운드 준비 중...</p>
+          )}
+        </div>
+
+        {/* ── 참가자 카드열 (퀴즈쇼 스탠드) ── */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+          {players.map(p => {
+            const isMe     = p.id === myId || p.nickname === nickname
+            const isWinner = lastResult?.winnerId === p.id
+            const bubble   = bubbles[p.id]
+            return (
+              <div
+                key={p.id}
+                style={{
+                  position: 'relative',
+                  flex: '0 0 calc(25% - 9px)',
+                  minWidth: 120,
+                  boxSizing: 'border-box'
+                }}
+              >
+                {/* 말풍선 */}
+                {bubble && (
+                  <div style={{
+                    position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)',
+                    zIndex: 20, maxWidth: 200, minWidth: 60,
+                    animation: 'bubblePop 0.18s ease-out'
+                  }}>
+                    <div style={{
+                      padding: '7px 12px', borderRadius: 14, fontSize: '0.86rem', fontWeight: 700,
+                      textAlign: 'center', wordBreak: 'break-word', whiteSpace: 'pre-wrap',
+                      color: bubble.correct ? '#052e16' : 'var(--text-primary)',
+                      background: bubble.correct
+                        ? 'linear-gradient(135deg,#34d399,#22c55e)'
+                        : 'rgba(255,255,255,0.14)',
+                      border: bubble.correct ? '1px solid #22c55e' : '1px solid rgba(255,255,255,0.18)',
+                      boxShadow: bubble.correct ? '0 0 18px rgba(34,197,94,0.55)' : '0 2px 10px rgba(0,0,0,0.3)'
+                    }}>
+                      {bubble.text}
+                    </div>
+                    {/* 말풍선 꼬리 */}
+                    <div style={{
+                      width: 0, height: 0, margin: '0 auto',
+                      borderLeft: '6px solid transparent',
+                      borderRight: '6px solid transparent',
+                      borderTop: `7px solid ${bubble.correct ? '#22c55e' : 'rgba(255,255,255,0.18)'}`
+                    }} />
+                  </div>
+                )}
+
+                {/* 카드 */}
+                <div style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                  padding: '12px 8px', borderRadius: 14,
+                  background: isMe ? 'rgba(124,58,237,0.18)' : 'rgba(255,255,255,0.05)',
+                  border: isWinner
+                    ? '1.5px solid #22c55e'
+                    : (isMe ? '1px solid rgba(124,58,237,0.6)' : '1px solid rgba(255,255,255,0.10)'),
+                  boxShadow: isWinner ? '0 0 16px rgba(34,197,94,0.5)' : 'none',
+                  transition: 'border 0.2s, box-shadow 0.2s',
+                  opacity: p.disconnected ? 0.5 : 1
+                }}>
+                  <div style={{ fontSize: '1.6rem', lineHeight: 1 }}>{p.avatar || getAvatar(p.id)}</div>
+                  <div style={{
+                    fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)',
+                    maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                  }}>
+                    {p.nickname}{isMe && ' (나)'}
+                  </div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 900 }} className="glow-cyan">
+                    {p.score}<span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600 }}> 점</span>
+                  </div>
+                  {p.disconnected && (
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>대기중</div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
 
       </div>
