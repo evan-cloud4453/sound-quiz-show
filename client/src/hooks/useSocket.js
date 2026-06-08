@@ -72,7 +72,8 @@ export function useSocket() {
       'chat_message',   // ★ 채팅
       'back_to_lobby',  // ★ 게임 종료 후 대기방 복귀
       'skip_opening',   // ★ 방장의 오프닝 안내방송 스킵
-      'kicked'          // ★ 강퇴 당함
+      'kicked',         // ★ 강퇴 당함
+      'player_guess'    // ★ 제출한 정답 실시간 말풍선
     ]
 
     const forwarders = {}
