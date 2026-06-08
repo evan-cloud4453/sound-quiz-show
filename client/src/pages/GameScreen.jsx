@@ -700,7 +700,7 @@ export default function GameScreen() {
         )}
 
         {/* 오디오 네모 + 타이머 (가로 배치, 타이머는 밖 우측 원래 크기) */}
-        <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap', justifyContent: 'center' }}>
           <div className="audio-area glass-panel" style={{ flex: '1 1 320px', minWidth: 0 }}>
             <div className="audio-inner">
               {mediaReady
