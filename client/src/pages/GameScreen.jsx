@@ -668,7 +668,7 @@ export default function GameScreen() {
       )}
 
       {/* ── 메인 세로 레이아웃 ── */}
-      <div style={{ maxWidth: 760, margin: '0 auto', padding: '16px 16px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ width: '100%', maxWidth: 1100, margin: '0 auto', padding: '16px 20px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
         {/* 라운드 진행 */}
         <div className="round-progress">
@@ -699,41 +699,47 @@ export default function GameScreen() {
           </div>
         )}
 
-        {/* 오디오 네모 (+ 타이머 우측 위) */}
-        <div className="audio-area glass-panel" style={{ position: 'relative' }}>
-          {/* 타이머 (작게, 우측 위) */}
-          <div style={{ position: 'absolute', top: 8, right: 8, transform: 'scale(0.5)', transformOrigin: 'top right' }}>
+        {/* 오디오 네모 + 타이머 (가로 배치, 타이머는 밖 우측 원래 크기) */}
+        <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap' }}>
+          <div className="audio-area glass-panel" style={{ flex: '1 1 320px', minWidth: 0 }}>
+            <div className="audio-inner">
+              {mediaReady
+                ? <WaveformVisualizer isPlaying={isPlaying} />
+                : <div className="audio-loading"><div className="loading-spinner" /><span>오디오 초기화 중...</span></div>
+              }
+              {playbackError && (
+                <div style={{ color:'#f87171', fontSize:'0.8rem', marginTop:'8px' }}>
+                  ⚠️ 영상을 불러올 수 없습니다. 다음 라운드를 기다려주세요.
+                </div>
+              )}
+              <div className="phase-label">{phaseLabel}</div>
+              {isHost && openingPhase && (
+                <button
+                  onClick={handleSkipOpening}
+                  style={{
+                    marginTop: 10, padding: '8px 18px', borderRadius: 999,
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    background: 'rgba(255,255,255,0.08)',
+                    color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer'
+                  }}
+                >
+                  설명 건너뛰고 시작
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 타이머 패널 (오디오 네모 밖 우측, 원래 크기) */}
+          <div className="timer-panel glass-panel" style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8
+          }}>
+            <div className="timer-label">남은 시간</div>
             <TimerRing
               key={`${currentRound}-${timerActive}`}
               timeLimit={timerLimit}
               active={timerActive}
             />
-          </div>
-
-          <div className="audio-inner">
-            {mediaReady
-              ? <WaveformVisualizer isPlaying={isPlaying} />
-              : <div className="audio-loading"><div className="loading-spinner" /><span>오디오 초기화 중...</span></div>
-            }
-            {playbackError && (
-              <div style={{ color:'#f87171', fontSize:'0.8rem', marginTop:'8px' }}>
-                ⚠️ 영상을 불러올 수 없습니다. 다음 라운드를 기다려주세요.
-              </div>
-            )}
-            <div className="phase-label">{phaseLabel}</div>
-            {isHost && openingPhase && (
-              <button
-                onClick={handleSkipOpening}
-                style={{
-                  marginTop: 10, padding: '8px 18px', borderRadius: 999,
-                  border: '1px solid rgba(255,255,255,0.25)',
-                  background: 'rgba(255,255,255,0.08)',
-                  color: 'var(--text-primary)', fontSize: '0.85rem', cursor: 'pointer'
-                }}
-              >
-                설명 건너뛰고 시작
-              </button>
-            )}
+            <div className="timer-hint">빠를수록 유리!</div>
           </div>
         </div>
 
@@ -781,8 +787,8 @@ export default function GameScreen() {
                 key={p.id}
                 style={{
                   position: 'relative',
-                  flex: '0 0 calc(25% - 9px)',
-                  minWidth: 120,
+                  flex: '1 1 170px',
+                  minWidth: 130,
                   boxSizing: 'border-box'
                 }}
               >
@@ -817,8 +823,9 @@ export default function GameScreen() {
 
                 {/* 카드 */}
                 <div style={{
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                  padding: '12px 8px', borderRadius: 14,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+                  minHeight: 118, height: '100%',
+                  padding: '14px 8px', borderRadius: 14,
                   background: isMe ? 'rgba(124,58,237,0.18)' : 'rgba(255,255,255,0.05)',
                   border: isWinner
                     ? '1.5px solid #22c55e'
