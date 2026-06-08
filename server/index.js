@@ -423,24 +423,43 @@ io.on('connection', (socket) => {
 
         const gained = room.currentRoundBonus ? 2 : 1;   // ★ 보너스면 2점
         player.score += gained;
-        io.to(room.code).emit('room_update', getRoomState(room));
-        io.to(room.code).emit('answer_result', {
-          correct:        true,
-          winnerId:       socket.id,
-          winnerNickname: player.nickname,
-          answer:         question.answers[0],
-          points:         gained,                          // ★ 획득 점수
-          isBonus:        room.currentRoundBonus,           // ★ 보너스 여부
-          scores:         room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+
+        // ★ 정답 말풍선(초록) 먼저 모두에게 표시
+        io.to(room.code).emit('player_guess', {
+          playerId: socket.id,
+          nickname: player.nickname,
+          text:     String(answer).slice(0, 40),
+          correct:  true
         });
 
-        setTimeout(() => checkEndOrNextRound(room), 2500);
+        // ★ 0.8초 뒤 정답 공개 이펙트 (초록 말풍선이 잠깐 보이고 넘어가게)
+        setTimeout(() => {
+          io.to(room.code).emit('room_update', getRoomState(room));
+          io.to(room.code).emit('answer_result', {
+            correct:        true,
+            winnerId:       socket.id,
+            winnerNickname: player.nickname,
+            answer:         question.answers[0],
+            points:         gained,                          // ★ 획득 점수
+            isBonus:        room.currentRoundBonus,           // ★ 보너스 여부
+            scores:         room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+          });
+          setTimeout(() => checkEndOrNextRound(room), 2500);
+        }, 800);
       } else {
+        // ★ 오답 말풍선(일반색)도 모두에게 표시
+        io.to(room.code).emit('player_guess', {
+          playerId: socket.id,
+          nickname: player.nickname,
+          text:     String(answer).slice(0, 40),
+          correct:  false
+        });
+        // 빨간 깜빡임은 본인 화면에만 (기존 유지)
         socket.emit('answer_result', {
           correct:  false,
           playerId: socket.id,
           message:  '틀렸습니다! 다시 시도해보세요.',
-          winnerId: null, 
+          winnerId: null,
           noWinner: false
         });
       }
