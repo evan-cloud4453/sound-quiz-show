@@ -130,7 +130,6 @@ export default function GameScreen() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [openingPhase,  setOpeningPhase]  = useState(false)
   const [bubbles,       setBubbles]       = useState({})   // ★ { playerId: { text, correct, key } }
-  const [guessFeed,     setGuessFeed]     = useState([])   // ★ 입력창 위 실시간 피드 (최근순)
 
   const inputRef           = useRef(null)
   const playerRef          = useRef(null)
@@ -183,6 +182,16 @@ export default function GameScreen() {
     backToTitle()
   }, [backToTitle])
 
+  // 전체화면 토글
+  const toggleFullscreen = useCallback(() => {
+    const el = document.documentElement
+    if (!document.fullscreenElement) {
+      (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)
+    } else {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)
+    }
+  }, [])
+
   // 한국어 음성 초기화
   useEffect(() => {
     const init = () => {
@@ -201,8 +210,6 @@ export default function GameScreen() {
     const unsub = on('player_guess', ({ playerId, text, correct }) => {
       const key = `${Date.now()}-${Math.random()}`
       setBubbles(prev => ({ ...prev, [playerId]: { text, correct, key } }))
-      // ★ 입력창 위 실시간 피드 (최근 8개 유지, 최신이 앞)
-      setGuessFeed(prev => [{ playerId, text, correct, key }, ...prev].slice(0, 8))
       clearTimeout(bubbleTimersRef.current[playerId])
       bubbleTimersRef.current[playerId] = setTimeout(() => {
         setBubbles(prev => {
@@ -219,7 +226,6 @@ export default function GameScreen() {
   // 라운드가 바뀌면 말풍선 초기화
   useEffect(() => {
     setBubbles({})
-    setGuessFeed([])
     Object.values(bubbleTimersRef.current).forEach(clearTimeout)
     bubbleTimersRef.current = {}
   }, [currentRound])
@@ -603,6 +609,23 @@ export default function GameScreen() {
         </div>
       )}
 
+      {/* 전체화면 버튼 (좌상단 고정, 기호만) */}
+      <button
+        onClick={toggleFullscreen}
+        aria-label="전체화면"
+        title="전체화면"
+        style={{
+          position:'fixed', top:14, left:14, zIndex:500,
+          width:30, height:30, padding:0, borderRadius:8,
+          display:'flex', alignItems:'center', justifyContent:'center',
+          border:'1px solid rgba(255,255,255,0.2)',
+          background:'rgba(255,255,255,0.08)',
+          color:'var(--text-primary)', fontSize:'0.95rem', lineHeight:1, cursor:'pointer'
+        }}
+      >
+        ⛶
+      </button>
+
       {/* 나가기 버튼 (우상단 고정) */}
       {soundUnlocked && (
         <button
@@ -751,26 +774,6 @@ export default function GameScreen() {
         <div className={`answer-area glass-panel ${roundActive?'active':''}`}>
           {roundActive ? (
             <>
-              {/* ★ 다른 사람 답 실시간 피드 (입력창 바로 위 → 모바일 키보드 위에 보임) */}
-              {guessFeed.length > 0 && (
-                <div className="guess-feed">
-                  {guessFeed.map(g => {
-                    const author = players.find(p => p.id === g.playerId)
-                    const isMine = g.playerId === myId
-                    return (
-                      <div
-                        key={g.key}
-                        className={`guess-chip ${g.correct ? 'correct' : ''} ${isMine ? 'mine' : ''}`}
-                      >
-                        <span className="guess-chip-name">
-                          {author?.avatar || getAvatar(g.playerId)} {author?.nickname || '???'}
-                        </span>
-                        <span className="guess-chip-text">{g.text}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
               <div className="answer-row">
                 <input
                   ref={inputRef}
@@ -800,8 +803,8 @@ export default function GameScreen() {
           )}
         </div>
 
-        {/* ── 참가자 카드열 (퀴즈쇼 스탠드) ── */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+        {/* ── 참가자 부스열 (퀴즈쇼 스탠드 — 각자 부스에서 소리치기) ── */}
+        <div className="player-booths" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginTop: 4 }}>
           {players.map(p => {
             const isMe     = p.id === myId || p.nickname === nickname
             const isWinner = lastResult?.winnerId === p.id

@@ -275,58 +275,10 @@
   box-shadow: var(--shadow-panel), 0 0 30px rgba(124,58,237,0.15);
 }
 
-/* ── 실시간 답 피드 (입력창 위) ── */
+/* bubblePop: 부스 위 말풍선 등장 애니메이션 */
 @keyframes bubblePop {
   0%   { transform: translateY(6px) scale(0.8); opacity: 0; }
   100% { transform: translateY(0) scale(1); opacity: 1; }
-}
-
-.guess-feed {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
-  max-height: 88px;
-  overflow-y: auto;
-}
-
-.guess-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 5px 10px;
-  border-radius: 999px;
-  font-size: 0.82rem;
-  background: rgba(255,255,255,0.07);
-  border: 1px solid rgba(255,255,255,0.12);
-  animation: bubblePop 0.18s ease-out;
-}
-
-.guess-chip.mine {
-  background: rgba(124,58,237,0.18);
-  border-color: rgba(124,58,237,0.5);
-}
-
-.guess-chip.correct {
-  background: linear-gradient(135deg, rgba(52,211,153,0.25), rgba(34,197,94,0.25));
-  border-color: var(--green-core);
-}
-
-.guess-chip-name {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.guess-chip-text {
-  font-weight: 600;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .answer-row {
@@ -467,6 +419,11 @@
   .game-screen {
     padding: 12px;
   }
+
+  /* 모바일: 부스열을 입력창 바로 위로 → 입력창에 포커스해 키보드가 떠도
+     브라우저가 입력창을 보이게 스크롤하므로 바로 위 부스(말풍선)가 함께 보임 */
+  .player-booths { order: 2; margin-top: 0 !important; }
+  .answer-area   { order: 3; }
 
   .game-layout {
     grid-template-columns: 1fr;
