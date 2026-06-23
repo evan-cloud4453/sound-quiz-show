@@ -130,6 +130,7 @@ export default function GameScreen() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [openingPhase,  setOpeningPhase]  = useState(false)
   const [bubbles,       setBubbles]       = useState({})   // ★ { playerId: { text, correct, key } }
+  const [guessFeed,     setGuessFeed]     = useState([])   // ★ 입력창 위 실시간 피드 (최근순)
 
   const inputRef           = useRef(null)
   const playerRef          = useRef(null)
@@ -200,6 +201,8 @@ export default function GameScreen() {
     const unsub = on('player_guess', ({ playerId, text, correct }) => {
       const key = `${Date.now()}-${Math.random()}`
       setBubbles(prev => ({ ...prev, [playerId]: { text, correct, key } }))
+      // ★ 입력창 위 실시간 피드 (최근 8개 유지, 최신이 앞)
+      setGuessFeed(prev => [{ playerId, text, correct, key }, ...prev].slice(0, 8))
       clearTimeout(bubbleTimersRef.current[playerId])
       bubbleTimersRef.current[playerId] = setTimeout(() => {
         setBubbles(prev => {
@@ -216,6 +219,7 @@ export default function GameScreen() {
   // 라운드가 바뀌면 말풍선 초기화
   useEffect(() => {
     setBubbles({})
+    setGuessFeed([])
     Object.values(bubbleTimersRef.current).forEach(clearTimeout)
     bubbleTimersRef.current = {}
   }, [currentRound])
@@ -747,6 +751,26 @@ export default function GameScreen() {
         <div className={`answer-area glass-panel ${roundActive?'active':''}`}>
           {roundActive ? (
             <>
+              {/* ★ 다른 사람 답 실시간 피드 (입력창 바로 위 → 모바일 키보드 위에 보임) */}
+              {guessFeed.length > 0 && (
+                <div className="guess-feed">
+                  {guessFeed.map(g => {
+                    const author = players.find(p => p.id === g.playerId)
+                    const isMine = g.playerId === myId
+                    return (
+                      <div
+                        key={g.key}
+                        className={`guess-chip ${g.correct ? 'correct' : ''} ${isMine ? 'mine' : ''}`}
+                      >
+                        <span className="guess-chip-name">
+                          {author?.avatar || getAvatar(g.playerId)} {author?.nickname || '???'}
+                        </span>
+                        <span className="guess-chip-text">{g.text}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
               <div className="answer-row">
                 <input
                   ref={inputRef}
