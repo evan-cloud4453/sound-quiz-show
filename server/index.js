@@ -17,6 +17,7 @@ const server = http.createServer(app);
 const CLIENT_URL       = process.env.CLIENT_URL || 'http://localhost:5173';
 const ROUND_COUNT      = 10;
 const ROUND_TIME_LIMIT = 15; // music_started 수신 후 정답 입력 시간 (초)
+const READY_GRACE_MS   = 4000; // ★ 첫 클라 음악 시작 후, 나머지 클라를 기다리는 최대 시간
 const RECONNECT_GRACE_MS = 120000; // ★ 연결 끊김 후 재접속 유예 시간 (2분). 3분 원하면 180000
 
 const io = new Server(server, {
@@ -152,8 +153,10 @@ function getRoomState(room) {
 function clearRoomTimers(room) {
   clearTimeout(room.roundTimer);
   clearTimeout(room.fallbackTimer);
+  clearTimeout(room.graceTimer);
   room.roundTimer    = null;
   room.fallbackTimer = null;
+  room.graceTimer    = null;
 }
 
 function startRoundTimer(room) {
@@ -161,6 +164,8 @@ function startRoundTimer(room) {
 
   clearTimeout(room.fallbackTimer);
   room.fallbackTimer = null;
+  clearTimeout(room.graceTimer);
+  room.graceTimer = null;
 
   const question = room.questions[room.currentRound - 1];
 
@@ -396,10 +401,21 @@ io.on('connection', (socket) => {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.status !== 'PLAYING') return;
       if (room.answeredThisRound)             return;
+      if (room.roundTimer)                    return; // 이미 정답 창이 열려 있음
       if (room.musicStartedSockets.has(socket.id)) return;
       room.musicStartedSockets.add(socket.id);
 
-      startRoundTimer(room); 
+      // 접속 중(유예중 아님) 플레이어가 모두 음악을 시작했으면 즉시 정답 창 오픈,
+      // 아니면 첫 준비 완료 후 READY_GRACE_MS 만 기다렸다가 오픈(느린 클라 보호).
+      const needed = room.players.filter(p => !p.disconnected).length;
+      if (room.musicStartedSockets.size >= needed) {
+        startRoundTimer(room);
+      } else if (!room.graceTimer) {
+        room.graceTimer = setTimeout(() => {
+          room.graceTimer = null;
+          startRoundTimer(room);
+        }, READY_GRACE_MS);
+      }
     } catch (e) {
       console.error('music_started 오류:', e);
     }
@@ -409,6 +425,7 @@ io.on('connection', (socket) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.status !== 'PLAYING') return;
+      if (!room.roundTimer)                   return; // 아직 정답 접수 전(안내/버퍼링 중)
 
       const player = room.players.find(p => p.id === socket.id);
       if (!player || room.answeredThisRound)  return;

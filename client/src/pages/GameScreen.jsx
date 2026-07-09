@@ -122,6 +122,7 @@ export default function GameScreen() {
   const [timerLimit,    setTimerLimit]    = useState(serverTimeLimit || 25)
   const [mediaReady,    setMediaReady]    = useState(false)
   const [answer,        setAnswer]        = useState('')
+  const [answersOpen,   setAnswersOpen]   = useState(false)   // ★ 서버가 정답 접수를 연 뒤에만 true
   const [submitted,     setSubmitted]     = useState(false)
   const [flashWrong,    setFlashWrong]    = useState(false)
   const [phaseLabel,    setPhaseLabel]    = useState('접속 대기 중...')
@@ -278,6 +279,8 @@ export default function GameScreen() {
     const unsub = on('timer_start', ({ timeLimit }) => {
       setTimerLimit(timeLimit)
       setTimerActive(true)
+      setAnswersOpen(true)                         // ★ 전원 준비됨 → 정답 입력 허용
+      setTimeout(() => inputRef.current?.focus(), 50)
     })
     return unsub
   }, [on])
@@ -400,7 +403,7 @@ export default function GameScreen() {
     const sig = ac.signal
 
     setAnswer(''); setSubmitted(false); setFlashWrong(false)
-    setIsPlaying(false); setTimerActive(false)
+    setIsPlaying(false); setTimerActive(false); setAnswersOpen(false)
     setShowResult(false); setPlaybackError(false)
     setBonusActive(false)
     musicStartedRef.current = false
@@ -500,6 +503,7 @@ export default function GameScreen() {
       seqAbortRef.current?.abort()
       clearInterval(tickRef.current)
       setTimerActive(false)
+      setAnswersOpen(false)
       setIsPlaying(false)
       try { playerRef.current?.stopVideo?.() } catch(e) {}
     }
@@ -544,10 +548,10 @@ export default function GameScreen() {
   }, [roundActive, soundUnlocked])
 
   const handleSubmit = useCallback(() => {
-    if (!answer.trim() || submitted || !roundActive) return
+    if (!answer.trim() || submitted || !roundActive || !answersOpen) return
     setSubmitted(true)
     submitAnswer(answer.trim())
-  }, [answer, submitted, roundActive, submitAnswer])
+  }, [answer, submitted, roundActive, answersOpen, submitAnswer])
 
   const handleKey = (e) => { if (e.key === 'Enter') handleSubmit() }
 
@@ -778,11 +782,11 @@ export default function GameScreen() {
                 <input
                   ref={inputRef}
                   className={`input answer-input ${flashWrong?'wrong':''}`}
-                  placeholder="정답을 입력하세요..."
+                  placeholder={answersOpen ? '정답을 입력하세요...' : '🎧 잠시만요… 곧 입력할 수 있어요'}
                   value={answer}
                   onChange={e => setAnswer(e.target.value)}
                   onKeyDown={handleKey}
-                  disabled={submitted && !flashWrong}
+                  disabled={!answersOpen || (submitted && !flashWrong)}
                   maxLength={40}
                   autoComplete="off"
                   autoCapitalize="none"
@@ -790,7 +794,7 @@ export default function GameScreen() {
                 <button
                   className="btn btn-primary submit-btn"
                   onClick={handleSubmit}
-                  disabled={!answer.trim() || (submitted && !flashWrong)}
+                  disabled={!answersOpen || !answer.trim() || (submitted && !flashWrong)}
                 >
                   제출
                 </button>
