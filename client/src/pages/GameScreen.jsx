@@ -11,13 +11,10 @@ import { useGame } from '../utils/GameContext'
 import { useSocket } from '../hooks/useSocket'
 import WaveformVisualizer from '../components/WaveformVisualizer'
 import TimerRing from '../components/TimerRing'
+import { getAvatar } from '../utils/avatars'
 import './GameScreen.css'
 
 const YT_STATE = { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3 }
-const AVATARS  = ['🚀','⭐','🌙','💫','🪐','☄️','🌟','🎵','👾','🛸','🌌','🔭']
-function getAvatar(id) {
-  return AVATARS[(id?.charCodeAt(id.length - 1) || 0) % AVATARS.length]
-}
 
 // ─── YouTube API 싱글톤 ───────────────────────────────────────
 let ytApiPromise = null

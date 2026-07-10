@@ -1,12 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { useGame } from '../utils/GameContext'
 import Confetti from '../components/Confetti'
+import { getAvatar } from '../utils/avatars'
 import './GameOverScreen.css'
-
-const AVATARS = ['🚀', '⭐', '🌙', '💫', '🪐', '☄️', '🌟', '🎵', '👾', '🛸', '🌌', '🔭']
-function getAvatar(id) {
-  return AVATARS[(id?.charCodeAt(id.length - 1) || 0) % AVATARS.length]
-}
 
 const RANK_MEDALS = ['🥇', '🥈', '🥉']
 

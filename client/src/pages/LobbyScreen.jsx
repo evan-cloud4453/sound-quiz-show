@@ -1,14 +1,8 @@
 // client/src/pages/LobbyScreen.jsx
 import React, { useState, useEffect, useRef } from 'react'
 import { useGame } from '../utils/GameContext'
+import { getAvatar } from '../utils/avatars'
 import './LobbyScreen.css'
-
-const AVATARS = ['🚀', '⭐', '🌙', '💫', '🪐', '☄️', '🌟', '👾', '🛸', '🌌', '🔭', '🎵']
-
-function getAvatar(id) {
-  const idx = id ? id.charCodeAt(id.length - 1) % AVATARS.length : 0
-  return AVATARS[idx]
-}
 
 export default function LobbyScreen() {
   const { state, startGame, backToTitle, sendChat, toggleReady, transferHost, kickPlayer, updateSettings } = useGame()

@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useGame } from '../utils/GameContext'
+import { AVATARS } from '../utils/avatars'
 import './TitleScreen.css'
-
-// ★ 표시용 아바타 목록 — Lobby/GameOver/GameScreen과 동일 집합으로 통일
-const AVATARS = ['🚀', '⭐', '🌙', '💫', '🪐', '☄️', '🌟', '🎵', '👾', '🛸', '🌌', '🔭']
 
 // 우주 컨셉 랜덤 닉네임 (형용사 + 명사 조합)
 const NICK_ADJ = ['빛나는', '용감한', '신비한', '떠도는', '고요한', '반짝이는', '무중력', '초신성', '은하수', '불타는', '얼어붙은', '머나먼', '광속의', '소용돌이', '잠 못 드는']
