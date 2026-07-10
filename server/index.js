@@ -161,16 +161,35 @@ function smartGrade(submitted, answers) {
   return false;
 }
 
+// ── 방장 식별 ──────────────────────────────────────────────────
+//   socket.id 는 재접속할 때마다 바뀌므로, 안정적인 pid(영구 토큰)로 방장을 관리한다.
+//   덕분에 잠깐 끊겼다 돌아와도 방장이 그대로 유지된다.
+function hostPlayer(room) {
+  return room.players.find(p => p.pid === room.hostPid) || null;
+}
+function isHost(room, socketId) {
+  const p = room.players.find(pl => pl.id === socketId);
+  return !!p && p.pid === room.hostPid;
+}
+// hostPid 를 가진 플레이어가 사라졌으면(나감/강퇴/유예만료) 접속 중인 사람에게 이양
+function reassignHostIfNeeded(room) {
+  if (!hostPlayer(room)) {
+    const next = room.players.find(p => !p.disconnected) || room.players[0];
+    if (next) room.hostPid = next.pid;
+  }
+}
+
 function getRoomState(room) {
+  const hp = hostPlayer(room);
   return {
     roomCode:      room.code,
-    hostId:        room.hostId,
+    hostId:        hp ? hp.id : null,   // 현재 접속 소켓 기준 방장 id (클라 호환용)
     players:       room.players.map(p => ({
       id: p.id, nickname: p.nickname,
       avatar: p.avatar,                // ★ 아바타 전달
       score: p.score, isReady: p.isReady,
       disconnected: !!p.disconnected,  // ★ 연결 끊김(유예중) 표시 → 클라에서 '대기중' 표시
-      isHost: p.id === room.hostId
+      isHost: p.pid === room.hostPid
     })),
     status:        room.status,
     currentRound:  room.currentRound,
@@ -243,7 +262,7 @@ io.on('connection', (socket) => {
         do { code = generateRoomCode(); } while (rooms.has(code));
         room = {
           code,
-          hostId:               socket.id,
+          hostPid:              pid || socket.id,   // ★ 방장은 pid로 식별(재접속 안정)
           players:              [],
           status:               'WAITING',
           currentRound:         0,
@@ -314,18 +333,18 @@ io.on('connection', (socket) => {
       socket.data.pid = pid;
       socket.data.nickname = player.nickname;
 
-      // ★ 살아있는 방장이 없으면(끊겨서 유령 ID로 남거나 혼자 방장이 나갔다 온 경우)
-      //   재접속한 사람을 방장으로 복구
-      const hostAlive = room.players.some(p => p.id === room.hostId && !p.disconnected);
-      if (!hostAlive) {
-        room.hostId = socket.id;
+      // ★ pid 기반이라 원래 방장이면 재접속만으로 방장이 자동 유지된다.
+      //   방장 자리가 비어 있으면(방장이 유예만료로 제거된 경우) 복구.
+      const beforePid = room.hostPid;
+      reassignHostIfNeeded(room);
+      if (room.hostPid !== beforePid && isHost(room, socket.id)) {
         io.to(room.code).emit('system_message', { text: `${player.nickname}님이 방장이 되었습니다.` });
       }
 
       io.to(room.code).emit('room_update', getRoomState(room));
       socket.to(room.code).emit('system_message', { text: `${player.nickname}님이 다시 연결되었습니다.` });
 
-      cb?.({ success: true, roomCode: room.code, isHost: room.hostId === socket.id });
+      cb?.({ success: true, roomCode: room.code, isHost: isHost(room, socket.id) });
 
       // ★ 현재 단계에 맞는 화면 복구를 이 소켓에만 전송
       if (room.phase === 'gameover' && room.lastGameOver) {
@@ -347,13 +366,13 @@ io.on('connection', (socket) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room)                     return cb?.({ error: '방을 찾을 수 없습니다.' });
-      if (room.hostId !== socket.id) return cb?.({ error: '방장만 게임을 시작할 수 있습니다.' });
+      if (!isHost(room, socket.id))  return cb?.({ error: '방장만 게임을 시작할 수 있습니다.' });
       if (room.status === 'PLAYING') return cb?.({ error: '이미 게임 중입니다.' });
 
       // ★ 대기방 시작 시에만 준비완료 게이트 적용. 재시작(rematch)은 같은 인원으로
       //    바로 다시 하는 것이므로 준비 체크를 건너뛴다. (버그: 재시작 차단 방지)
       if (!fromRematch) {
-        const others = room.players.filter(p => p.id !== room.hostId);
+        const others = room.players.filter(p => p.pid !== room.hostPid);
         if (!others.every(p => p.isReady)) {
           return cb?.({ error: '아직 준비하지 않은 플레이어가 있습니다.' });
         }
@@ -580,10 +599,10 @@ io.on('connection', (socket) => {
   socket.on('transfer_host', ({ targetId } = {}) => {
     try {
       const room = rooms.get(socket.data.roomCode);
-      if (!room || room.hostId !== socket.id) return; // 현재 방장만
+      if (!room || !isHost(room, socket.id)) return; // 현재 방장만
       const target = room.players.find(p => p.id === targetId);
-      if (!target) return;
-      room.hostId = targetId;
+      if (!target || target.disconnected) return;    // 접속 중인 대상에게만 이양
+      room.hostPid = target.pid;
       io.to(room.code).emit('room_update', getRoomState(room));
       io.to(room.code).emit('system_message', { text: `${target.nickname}님이 새 방장이 되었습니다.` });
     } catch (e) {
@@ -596,7 +615,7 @@ io.on('connection', (socket) => {
   socket.on('update_settings', ({ targetScore, roundCount, categories } = {}) => {
     try {
       const room = rooms.get(socket.data.roomCode);
-      if (!room || room.hostId !== socket.id || room.status !== 'WAITING') return;
+      if (!room || !isHost(room, socket.id) || room.status !== 'WAITING') return;
 
       let changed = false;
       if (targetScore != null) {
@@ -625,7 +644,7 @@ io.on('connection', (socket) => {
   socket.on('skip_opening', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
-      if (!room || room.hostId !== socket.id) return; // 방장만 허용
+      if (!room || !isHost(room, socket.id)) return; // 방장만 허용
       io.to(room.code).emit('skip_opening'); // 전원 동시 스킵 (요청자 포함)
     } catch (e) {
       console.error('skip_opening 오류:', e);
@@ -636,7 +655,7 @@ io.on('connection', (socket) => {
   socket.on('return_to_lobby', () => {
     try {
       const room = rooms.get(socket.data.roomCode);
-      if (!room || room.hostId !== socket.id) return;
+      if (!room || !isHost(room, socket.id)) return;
 
       clearRoomTimers(room);
       room.status              = 'WAITING';
@@ -660,10 +679,9 @@ io.on('connection', (socket) => {
   socket.on('kick_player', ({ targetId } = {}) => {
     try {
       const room = rooms.get(socket.data.roomCode);
-      if (!room || room.hostId !== socket.id) return;   // 방장만
-      if (targetId === room.hostId) return;             // 자기 자신 강퇴 불가
+      if (!room || !isHost(room, socket.id)) return;    // 방장만
       const target = room.players.find(p => p.id === targetId);
-      if (!target) return;
+      if (!target || target.pid === room.hostPid) return; // 방장(자신) 강퇴 불가
 
       const gt = room.disconnectTimers.get(target.pid);   // 유예 타이머 있으면 정리
       if (gt) { clearTimeout(gt); room.disconnectTimers.delete(target.pid); }
@@ -695,14 +713,16 @@ io.on('connection', (socket) => {
       if (!room) return;
 
       const leaving = room.players.find(p => p.id === socket.id);
+      const wasHost = !!leaving && leaving.pid === room.hostPid;
       room.players = room.players.filter(p => p.id !== socket.id);
       room.musicStartedSockets?.delete(socket.id);
 
       if (room.players.length === 0) { clearRoomTimers(room); rooms.delete(roomCode); return; }
 
-      if (room.hostId === socket.id) {
-        room.hostId = room.players[0].id;
-        io.to(roomCode).emit('system_message', { text: `${room.players[0].nickname}님이 새로운 방장이 되었습니다.` });
+      if (wasHost) {
+        reassignHostIfNeeded(room);
+        const hp = hostPlayer(room);
+        if (hp) io.to(roomCode).emit('system_message', { text: `${hp.nickname}님이 새로운 방장이 되었습니다.` });
       } else if (leaving) {
         io.to(roomCode).emit('system_message', { text: `${leaving.nickname}님이 나갔습니다.` });
       }
@@ -726,14 +746,8 @@ io.on('connection', (socket) => {
     const pid = player.pid;
     const nickname = player.nickname;
 
-    // 방장이 끊기면 접속중인 다른 플레이어에게 즉시 이양 (방 조작 가능 유지)
-    if (room.hostId === socket.id) {
-      const alive = room.players.find(p => !p.disconnected);
-      if (alive) {
-        room.hostId = alive.id;
-        io.to(roomCode).emit('system_message', { text: `${alive.nickname}님이 새로운 방장이 되었습니다.` });
-      }
-    }
+    // ★ 방장이 잠깐 끊긴 것뿐일 수 있으므로 여기서는 방장을 넘기지 않는다.
+    //   (pid로 관리하므로 재접속하면 방장이 그대로 유지됨. 유예 만료 시에만 재이양)
 
     io.to(roomCode).emit('system_message', { text: `${nickname}님의 연결이 끊겼습니다. 잠시 기다립니다...` });
     io.to(roomCode).emit('room_update', getRoomState(room));
@@ -756,11 +770,11 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // 호스트가 아직 떠난 사람으로 남아있으면 재이양
-      if (room.hostId === target.id) {
-        const alive = room.players.find(p => !p.disconnected) || room.players[0];
-        room.hostId = alive.id;
-        io.to(roomCode).emit('system_message', { text: `${alive.nickname}님이 새로운 방장이 되었습니다.` });
+      // 유예 만료로 방장이 완전히 제거됐으면 접속 중인 사람에게 재이양
+      if (target.pid === room.hostPid) {
+        reassignHostIfNeeded(room);
+        const hp = hostPlayer(room);
+        if (hp) io.to(roomCode).emit('system_message', { text: `${hp.nickname}님이 새로운 방장이 되었습니다.` });
       }
 
       io.to(roomCode).emit('system_message', { text: `${nickname}님이 퇴장했습니다.` });
