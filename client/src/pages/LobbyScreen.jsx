@@ -16,7 +16,11 @@ export default function LobbyScreen() {
   const [targetScore, setTargetScore] = useState(ctxTargetScore || 5)
   const [roundCount, setRoundCount]   = useState(ctxRoundCount || 10)
   const [selectedCats, setSelectedCats] = useState(ctxCats || [])
+  const [maxPlayersInput, setMaxPlayersInput] = useState(maxPlayers || 5) // ★ 설정에서 최대 인원 조절
   const [showSettings, setShowSettings] = useState(false)
+
+  // 설정창을 열 때 현재 방 최대 인원을 반영 (다른 값으로 갱신됐을 수 있으므로)
+  useEffect(() => { if (showSettings) setMaxPlayersInput(maxPlayers || 5) }, [showSettings, maxPlayers])
 
   const [copied, setCopied]   = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
@@ -67,7 +71,7 @@ export default function LobbyScreen() {
 
   // 설정창 닫을 때 서버에 현재 설정을 알려 다른 유저도 보이게 함
   const closeSettings = () => {
-    updateSettings({ targetScore, roundCount, categories: selectedCats })
+    updateSettings({ targetScore, roundCount, categories: selectedCats, maxPlayers: maxPlayersInput })
     setShowSettings(false)
   }
 
@@ -371,6 +375,28 @@ export default function LobbyScreen() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* 최대 인원 (현재 인원수보다 낮게는 못 내림) */}
+            <div className="setting-row" style={{ marginBottom: 20 }}>
+              <label>최대 인원 ({maxPlayersInput}명)</label>
+              <input
+                type="range"
+                min={Math.max(5, players.length)}
+                max={15}
+                step={1}
+                value={Math.max(maxPlayersInput, Math.max(5, players.length))}
+                onChange={e => setMaxPlayersInput(Number(e.target.value))}
+                style={{ width: '100%', accentColor: 'var(--purple-core, #7c3aed)' }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                <span>{Math.max(5, players.length)}명</span><span>15명</span>
+              </div>
+              {players.length > 5 && (
+                <p style={{ color: 'var(--text-dim)', fontSize: '0.74rem', marginTop: 6 }}>
+                  * 현재 인원({players.length}명)보다 적게는 설정할 수 없습니다.
+                </p>
+              )}
             </div>
 
             {/* 주제 선택 — 세로 스택 + 스크롤 체크리스트 */}

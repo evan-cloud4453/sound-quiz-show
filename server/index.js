@@ -650,7 +650,7 @@ io.on('connection', (socket) => {
 
   // ── 방 설정 실시간 공유 (방장만) ──────────────────────────────
   // 방장이 설정창에서 값을 바꾸면 즉시 방 전체에 반영 → 다른 유저도 목표점수/라운드 수 확인 가능
-  socket.on('update_settings', ({ targetScore, roundCount, categories } = {}) => {
+  socket.on('update_settings', ({ targetScore, roundCount, categories, maxPlayers } = {}) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room || !isHost(room, socket.id) || room.status !== 'WAITING') return;
@@ -663,6 +663,12 @@ io.on('connection', (socket) => {
       if (roundCount != null) {
         const v = Math.max(1, Math.min(Number(roundCount) || room.roundCount, 30));
         if (v !== room.roundCount) { room.roundCount = v; changed = true; }
+      }
+      if (maxPlayers != null) {
+        // 5~15 범위 + 현재 인원수보다 낮게는 못 내림
+        const floor = Math.max(5, room.players.length);
+        const v = Math.max(floor, Math.min(15, Number(maxPlayers) || room.maxPlayers));
+        if (v !== room.maxPlayers) { room.maxPlayers = v; changed = true; }
       }
       if (Array.isArray(categories)) {
         const prev = (room.selectedCategories || []).slice().sort().join('|');
