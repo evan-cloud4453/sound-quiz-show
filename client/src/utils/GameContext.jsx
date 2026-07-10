@@ -19,6 +19,7 @@ const initialState = {
   hostId: null,
   gameStatus: 'WAITING',
   targetScore: 5,
+  maxPlayers: 5,             // ★ 방 최대 인원 (방 생성 시 5~15, 기본 5)
 
   // ★ 게임 설정
   roundCount: 10,            // 라운드 수
@@ -69,6 +70,7 @@ function reducer(state, action) {
         hostId: action.data.hostId,
         gameStatus: action.data.status,
         targetScore: action.data.targetScore,
+        maxPlayers: action.data.maxPlayers ?? state.maxPlayers,
         roundCount: action.data.roundCount ?? state.roundCount,
         // 서버가 주제 목록을 보내주면 갱신 (없으면 기존 유지)
         availableCategories: action.data.categories?.length
@@ -237,8 +239,8 @@ export function GameProvider({ children }) {
     return () => unsubs.forEach(u => u())
   }, [on])
 
-  const joinRoom = useCallback((nickname, roomCode, avatar) => {
-    emit('join_room', { nickname, roomCode: roomCode || undefined, avatar, pid }, (res) => {
+  const joinRoom = useCallback((nickname, roomCode, avatar, maxPlayers) => {
+    emit('join_room', { nickname, roomCode: roomCode || undefined, avatar, pid, maxPlayers }, (res) => {
       if (res.error) {
         alert(res.error)
         return

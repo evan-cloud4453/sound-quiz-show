@@ -184,6 +184,7 @@ function getRoomState(room) {
   return {
     roomCode:      room.code,
     hostId:        hp ? hp.id : null,   // 현재 접속 소켓 기준 방장 id (클라 호환용)
+    maxPlayers:    room.maxPlayers,     // ★ 방 최대 인원 (방 생성 시 5~15)
     players:       room.players.map(p => ({
       id: p.id, nickname: p.nickname,
       avatar: p.avatar,                // ★ 아바타 전달
@@ -247,7 +248,7 @@ function startRoundTimer(room) {
 io.on('connection', (socket) => {
   console.log(`[접속] ${socket.id}`);
 
-  socket.on('join_room', ({ nickname, roomCode, avatar, pid }, cb) => {
+  socket.on('join_room', ({ nickname, roomCode, avatar, pid, maxPlayers }, cb) => {
     try {
       let room;
       let isNewRoom = false;
@@ -256,13 +257,14 @@ io.on('connection', (socket) => {
         room = rooms.get(roomCode.toUpperCase());
         if (!room)                      return cb({ error: '존재하지 않는 방 코드입니다.' });
         if (room.status === 'PLAYING')  return cb({ error: '이미 게임이 진행 중입니다.' });
-        if (room.players.length >= 15)  return cb({ error: '방이 가득 찼습니다. (최대 15명)' });
+        if (room.players.length >= room.maxPlayers) return cb({ error: `방이 가득 찼습니다. (최대 ${room.maxPlayers}명)` });
       } else {
         let code;
         do { code = generateRoomCode(); } while (rooms.has(code));
         room = {
           code,
           hostPid:              pid || socket.id,   // ★ 방장은 pid로 식별(재접속 안정)
+          maxPlayers:           Math.max(5, Math.min(15, Number(maxPlayers) || 5)), // ★ 5~15, 기본 5
           players:              [],
           status:               'WAITING',
           currentRound:         0,

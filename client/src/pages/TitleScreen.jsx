@@ -18,6 +18,7 @@ export default function TitleScreen() {
   const [mode, setMode] = useState(null) // null | 'create' | 'join'
   const [nickname, setNickname] = useState('')
   const [roomCode, setRoomCode] = useState('')
+  const [maxPlayers, setMaxPlayers] = useState(5) // ★ 방 만들기 시 최대 인원 (5~15, 기본 5)
   // ★ 아바타를 사용자가 고를 수 있게 state로 (선택값이 서버까지 전달됨)
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[Math.floor(Math.random() * AVATARS.length)])
   const [showAvatarPicker, setShowAvatarPicker] = useState(false)
@@ -67,8 +68,13 @@ useEffect(() => {
     if (mode === 'join' && !roomCode.trim()) { setError('방 코드를 입력해주세요'); return }
     setError('')
     setLoading(true)
-    // ★ 선택한 아바타를 함께 전달 → 들어간 뒤에도 동일한 아바타로 표시됨
-    joinRoom(trimmed, mode === 'join' ? roomCode.toUpperCase() : null, selectedAvatar)
+    // ★ 선택한 아바타 + (방 생성 시) 최대 인원을 함께 전달
+    joinRoom(
+      trimmed,
+      mode === 'join' ? roomCode.toUpperCase() : null,
+      selectedAvatar,
+      mode === 'create' ? maxPlayers : undefined
+    )
     setTimeout(() => setLoading(false), 3000)
   }
 
@@ -208,6 +214,25 @@ useEffect(() => {
                 </button>
               </div>
             </div>
+
+            {mode === 'create' && (
+              <div className="input-group">
+                <label>최대 인원 ({maxPlayers}명)</label>
+                <input
+                  className="input"
+                  type="range"
+                  min={5}
+                  max={15}
+                  step={1}
+                  value={maxPlayers}
+                  onChange={e => setMaxPlayers(Number(e.target.value))}
+                  style={{ width: '100%', padding: 0, accentColor: 'var(--purple-core, #7c3aed)' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                  <span>5명</span><span>15명</span>
+                </div>
+              </div>
+            )}
 
             {mode === 'join' && (
               <div className="input-group">
