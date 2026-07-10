@@ -112,17 +112,51 @@ function levenshtein(a, b) {
   return dp[m][n];
 }
 
+// ── 한글 음절 → 자모(초·중·종성) 분해 ──────────────────────────
+//   음절 단위 편집거리는 오타 1개도 dist=1이라 지나치게 관대함.
+//   자모로 풀면 "블랙핑크→블랙핑그"(ㅋ→ㄱ)는 거리 1로 관대하게,
+//   음절이 통째로 바뀐 경우는 거리 2~3이 되어 걸러진다.
+const HANGUL_CHO  = ['ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+const HANGUL_JUNG = ['ㅏ','ㅐ','ㅑ','ㅒ','ㅓ','ㅔ','ㅕ','ㅖ','ㅗ','ㅘ','ㅙ','ㅚ','ㅛ','ㅜ','ㅝ','ㅞ','ㅟ','ㅠ','ㅡ','ㅢ','ㅣ'];
+const HANGUL_JONG = ['','ㄱ','ㄲ','ㄳ','ㄴ','ㄵ','ㄶ','ㄷ','ㄹ','ㄺ','ㄻ','ㄼ','ㄽ','ㄾ','ㄿ','ㅀ','ㅁ','ㅂ','ㅄ','ㅅ','ㅆ','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+
+function decomposeHangul(str) {
+  let out = '';
+  for (const ch of str) {
+    const code = ch.charCodeAt(0);
+    if (code >= 0xAC00 && code <= 0xD7A3) {
+      const s = code - 0xAC00;
+      out += HANGUL_CHO[Math.floor(s / 588)]
+           + HANGUL_JUNG[Math.floor((s % 588) / 28)]
+           + HANGUL_JONG[s % 28];
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 function smartGrade(submitted, answers) {
   const ns = normalise(submitted);
   if (!ns) return false;
+  const nsJamo = decomposeHangul(ns);
+
   for (const ans of answers) {
     const na = normalise(ans);
-    if (ns === na) return true;
-    if (na.length >= 3) {
-      const dist = levenshtein(ns, na);
-      const sim  = 1 - dist / Math.max(na.length, ns.length);
-      if (sim >= 0.8 || dist === 1) return true;
-    }
+    if (!na) continue;
+    if (ns === na) return true;                    // 정규화 후 완전 일치
+
+    const naJamo = decomposeHangul(na);
+    if (nsJamo === naJamo) return true;            // 자모까지 동일
+
+    // 자모 길이에 비례한 오타 허용치 (짧은 답일수록 엄격)
+    const len = Math.max(naJamo.length, nsJamo.length);
+    let allowed;
+    if (len <= 4)      allowed = 0;                // 아주 짧은 답 → 정확 일치만
+    else if (len <= 8) allowed = 1;                // 중간 길이 → 오타 1개까지
+    else               allowed = Math.floor(len * 0.2); // 긴 답 → 20%까지
+
+    if (allowed > 0 && levenshtein(nsJamo, naJamo) <= allowed) return true;
   }
   return false;
 }
