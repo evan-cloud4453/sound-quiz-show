@@ -162,9 +162,9 @@ export default function LobbyScreen() {
           {/* Players list */}
           <div className="glass-panel players-panel animate-fadeInUp" style={{ animationDelay: '0.1s' }}>
             <div className="panel-title">
-              <span>플레이어 ({players.length}/10)</span>
+              <span>플레이어 ({players.length}/15)</span>
               <div className="players-count-bar">
-                {Array.from({ length: 10 }).map((_, i) => (
+                {Array.from({ length: 15 }).map((_, i) => (
                   <div key={i} className={`count-pip ${i < players.length ? 'filled' : ''}`} />
                 ))}
               </div>

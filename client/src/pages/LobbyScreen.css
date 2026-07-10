@@ -110,6 +110,9 @@
 .players-count-bar {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 140px;
 }
 
 .count-pip {

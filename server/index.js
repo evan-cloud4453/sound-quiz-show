@@ -203,7 +203,7 @@ io.on('connection', (socket) => {
         room = rooms.get(roomCode.toUpperCase());
         if (!room)                      return cb({ error: '존재하지 않는 방 코드입니다.' });
         if (room.status === 'PLAYING')  return cb({ error: '이미 게임이 진행 중입니다.' });
-        if (room.players.length >= 10)  return cb({ error: '방이 가득 찼습니다. (최대 10명)' });
+        if (room.players.length >= 15)  return cb({ error: '방이 가득 찼습니다. (최대 15명)' });
       } else {
         let code;
         do { code = generateRoomCode(); } while (rooms.has(code));
