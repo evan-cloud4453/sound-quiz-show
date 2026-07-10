@@ -82,7 +82,7 @@ function generateRoomCode() {
   return code;
 }
 
-function getRandomQuestions(count = 10, categories = []) {
+function getRandomQuestions(count = 10, categories = [], seenCounts = null) {
   // 선택한 주제만 필터링. 선택이 없거나 결과가 0개면 전체에서 출제.
   let pool = VALIDATED_QUIZ_DATA;
   if (Array.isArray(categories) && categories.length > 0) {
@@ -90,9 +90,15 @@ function getRandomQuestions(count = 10, categories = []) {
     const filtered = VALIDATED_QUIZ_DATA.filter(q => set.has(q.category));
     if (filtered.length > 0) pool = filtered;
   }
-  return [...pool]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, Math.min(count, pool.length));
+
+  // ★ LFU(least-frequently-used) 선택:
+  //   방에서 '적게 나온 문제'부터 뽑는다. 같은 횟수끼리는 랜덤.
+  //   → 풀 전체를 한 바퀴 돌기 전엔 재등장 없음. 풀이 작아도 절대 고갈되지 않음.
+  //   seenCounts 는 방 단위 Map(문제id → 나온 횟수), 방이 사라지면 함께 소멸.
+  const seen = seenCounts instanceof Map ? seenCounts : new Map();
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);         // 1) 먼저 랜덤 섞기
+  shuffled.sort((a, b) => (seen.get(a.id) || 0) - (seen.get(b.id) || 0)); // 2) 안정정렬: 적게 나온 순 (동률은 랜덤 유지)
+  return shuffled.slice(0, Math.min(count, pool.length));
 }
 
 function normalise(text) {
@@ -316,7 +322,8 @@ io.on('connection', (socket) => {
           currentRoundBonus:    false,      // ★ 이번 라운드 보너스 여부
           phase:                'lobby',    // ★ lobby | game | gameover (재접속 복구용)
           lastGameOver:         null,       // ★ 마지막 game_over 페이로드 (복구 시 재전송)
-          disconnectTimers:     new Map()   // ★ pid → 유예 타이머
+          disconnectTimers:     new Map(),  // ★ pid → 유예 타이머
+          seenCounts:           new Map()   // ★ 문제id → 나온 횟수 (LFU 출제, 방 소멸 시 함께 사라짐)
         };
         rooms.set(code, room);
         isNewRoom = true;
@@ -417,8 +424,11 @@ io.on('connection', (socket) => {
       }
 
       const count = Math.max(1, Math.min(Number(roundCount) || ROUND_COUNT, 30));
-      const questions = getRandomQuestions(count, categories);
+      if (!(room.seenCounts instanceof Map)) room.seenCounts = new Map(); // 안전장치
+      const questions = getRandomQuestions(count, categories, room.seenCounts);
       if (questions.length === 0)    return cb?.({ error: '선택한 주제에 출제 가능한 문제가 없습니다.' });
+      // ★ 이번에 뽑힌 문제의 '나온 횟수' +1 → 다음 판(다시하기 포함)에서 덜 나오게
+      questions.forEach(q => room.seenCounts.set(q.id, (room.seenCounts.get(q.id) || 0) + 1));
 
       room.status             = 'PLAYING';
       room.currentRound       = 0;
