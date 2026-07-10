@@ -162,35 +162,44 @@ function smartGrade(submitted, answers) {
 }
 
 // ── 방장 식별 ──────────────────────────────────────────────────
-//   socket.id 는 재접속할 때마다 바뀌므로, 안정적인 pid(영구 토큰)로 방장을 관리한다.
-//   덕분에 잠깐 끊겼다 돌아와도 방장이 그대로 유지된다.
-function hostPlayer(room) {
+//   socket.id 는 재접속할 때마다 바뀌므로 안정적인 pid(영구 토큰)로 소유 방장을 관리한다.
+//   ★ '실효 방장(effective host)': 소유 방장이 접속 중이면 그대로,
+//      끊겨 있는 동안엔 접속 중인 다른 플레이어가 임시로 방장 역할을 맡는다.
+//      → 방장이 잠깐 끊겨도 방에는 늘 방장이 존재하고, 소유 방장이 돌아오면 자동 회복.
+function ownerHostPlayer(room) {                       // pid로 지정된 소유 방장(끊겨 있을 수 있음)
   return room.players.find(p => p.pid === room.hostPid) || null;
 }
-function isHost(room, socketId) {
-  const p = room.players.find(pl => pl.id === socketId);
-  return !!p && p.pid === room.hostPid;
+function effectiveHostPlayer(room) {                    // 지금 실제로 방장 권한을 가진 접속자
+  const owner = room.players.find(p => p.pid === room.hostPid && !p.disconnected);
+  if (owner) return owner;
+  return room.players.find(p => !p.disconnected) || null;
 }
-// hostPid 를 가진 플레이어가 사라졌으면(나감/강퇴/유예만료) 접속 중인 사람에게 이양
+function isHost(room, socketId) {
+  const eff = effectiveHostPlayer(room);
+  return !!eff && eff.id === socketId;
+}
+// 소유 방장이 방에서 완전히 사라졌으면(나감/강퇴/유예만료) 접속자에게 소유권을 넘긴다.
 function reassignHostIfNeeded(room) {
-  if (!hostPlayer(room)) {
+  if (!ownerHostPlayer(room)) {
     const next = room.players.find(p => !p.disconnected) || room.players[0];
     if (next) room.hostPid = next.pid;
   }
 }
+// 이름 호환(기존 호출부 유지용)
+function hostPlayer(room) { return effectiveHostPlayer(room); }
 
 function getRoomState(room) {
-  const hp = hostPlayer(room);
+  const eff = effectiveHostPlayer(room);
   return {
     roomCode:      room.code,
-    hostId:        hp ? hp.id : null,   // 현재 접속 소켓 기준 방장 id (클라 호환용)
+    hostId:        eff ? eff.id : null,   // 현재 실효 방장의 소켓 id (클라 호환용)
     maxPlayers:    room.maxPlayers,     // ★ 방 최대 인원 (방 생성 시 5~15)
     players:       room.players.map(p => ({
       id: p.id, nickname: p.nickname,
       avatar: p.avatar,                // ★ 아바타 전달
       score: p.score, isReady: p.isReady,
       disconnected: !!p.disconnected,  // ★ 연결 끊김(유예중) 표시 → 클라에서 '대기중' 표시
-      isHost: p.pid === room.hostPid
+      isHost: !!eff && p.id === eff.id
     })),
     status:        room.status,
     currentRound:  room.currentRound,
@@ -256,6 +265,31 @@ io.on('connection', (socket) => {
       if (roomCode) {
         room = rooms.get(roomCode.toUpperCase());
         if (!room)                      return cb({ error: '존재하지 않는 방 코드입니다.' });
+
+        // ★ 끊겼다가(또는 '메인으로' 등으로 세션 없이) 같은 방에 다시 들어오는 본인:
+        //   중복 추가하지 말고 기존 항목을 재바인딩(재접속 처리)한다. → 방장/인원 꼬임 방지
+        const mine = room.players.find(p => p.pid === (pid || socket.id));
+        if (mine) {
+          const gt = room.disconnectTimers.get(mine.pid);
+          if (gt) { clearTimeout(gt); room.disconnectTimers.delete(mine.pid); }
+          mine.id = socket.id;
+          mine.disconnected = false;
+          if (nickname) mine.nickname = nickname;
+          if (avatar)   mine.avatar = avatar;
+          socket.join(room.code);
+          socket.data.roomCode = room.code;
+          socket.data.pid = mine.pid;
+          socket.data.nickname = mine.nickname;
+          reassignHostIfNeeded(room);
+          io.to(room.code).emit('room_update', getRoomState(room));
+          // 진행 단계에 맞는 화면 복구(진행 중/종료 화면)
+          if (room.phase === 'gameover' && room.lastGameOver) socket.emit('game_over', room.lastGameOver);
+          else if (room.phase === 'game') socket.emit('game_started', {
+            totalRounds: room.questions.length, targetScore: room.targetScore, autoSkipOpening: true
+          });
+          return cb({ success: true, roomCode: room.code, isHost: isHost(room, socket.id) });
+        }
+
         if (room.status === 'PLAYING')  return cb({ error: '이미 게임이 진행 중입니다.' });
         if (room.players.length >= room.maxPlayers) return cb({ error: `방이 가득 찼습니다. (최대 ${room.maxPlayers}명)` });
       } else {
@@ -374,7 +408,9 @@ io.on('connection', (socket) => {
       // ★ 대기방 시작 시에만 준비완료 게이트 적용. 재시작(rematch)은 같은 인원으로
       //    바로 다시 하는 것이므로 준비 체크를 건너뛴다. (버그: 재시작 차단 방지)
       if (!fromRematch) {
-        const others = room.players.filter(p => p.pid !== room.hostPid);
+        // 방장(실효) 본인과 연결이 끊긴(유예중) 플레이어는 준비 체크에서 제외
+        const eff = effectiveHostPlayer(room);
+        const others = room.players.filter(p => !p.disconnected && p.id !== eff?.id);
         if (!others.every(p => p.isReady)) {
           return cb?.({ error: '아직 준비하지 않은 플레이어가 있습니다.' });
         }
