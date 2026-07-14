@@ -48,26 +48,43 @@ let VALIDATED_QUIZ_DATA = [];
 // 설정창에서 고를 수 있는 주제 목록 (원본 데이터 기준, 항상 사용 가능)
 const ALL_CATEGORIES = [...new Set(QUIZ_DATA.map(q => q.category))];
 
+// oEmbed로 영상 유효성 확인.
+//  ★ fail-open: '확실히 없는' 경우(400 잘못된ID / 401 비공개 / 404 삭제)만 제외하고,
+//    429/403(레이트리밋)·5xx·타임아웃·네트워크오류 등 일시적 실패는 '유지'한다.
+//    (예전엔 200이 아니면 전부 제외 → throttle 걸린 멀쩡한 영상까지 대량 오탈락)
 function checkYouTubeValid(youtubeId) {
   return new Promise((resolve) => {
-    const url = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}`;
-    https.get(url, (res) => resolve(res.statusCode === 200))
-         .on('error', () => resolve(false));
+    const url = `https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=${youtubeId}`;
+    const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+      res.resume(); // 응답 본문 폐기(소켓 해제)
+      const code = res.statusCode;
+      resolve(!(code === 400 || code === 401 || code === 404)); // 확실히 없는 것만 false
+    });
+    req.on('error', () => resolve(true));                 // 네트워크 오류 → 유지
+    req.setTimeout(8000, () => { req.destroy(); resolve(true); }); // 타임아웃 → 유지
   });
 }
 
 async function preCheckQuestions() {
   console.log('🔍 유튜브 링크 유효성 검사 중...');
-  const base    = QUIZ_DATA.filter(q => q.youtubeId && q.youtubeId.length >= 10);
-  const results = await Promise.all(
-    base.map(async q => {
-      const ok = await checkYouTubeValid(q.youtubeId);
-      if (!ok) console.log(`❌ 제외: ${q.youtubeId} (${q.answers[0]})`);
-      return ok ? q : null;
-    })
-  );
-  VALIDATED_QUIZ_DATA = results.filter(Boolean);
-  console.log(`✅ 유효 문제 ${VALIDATED_QUIZ_DATA.length}개 준비 완료`);
+  const base = QUIZ_DATA.filter(q => q.youtubeId && q.youtubeId.length >= 10);
+
+  // ★ 같은 영상은 한 번만 검사(중복 요청 폭주 방지) + 동시 요청 수 제한(배치)
+  const uniqueIds = [...new Set(base.map(q => q.youtubeId))];
+  const statusMap = new Map();
+  const CONCURRENCY = 12;
+  for (let i = 0; i < uniqueIds.length; i += CONCURRENCY) {
+    const chunk = uniqueIds.slice(i, i + CONCURRENCY);
+    const oks = await Promise.all(chunk.map(id => checkYouTubeValid(id)));
+    chunk.forEach((id, j) => statusMap.set(id, oks[j]));
+  }
+
+  VALIDATED_QUIZ_DATA = base.filter(q => {
+    const ok = statusMap.get(q.youtubeId);
+    if (!ok) console.log(`❌ 제외: ${q.youtubeId} (${q.answers[0]})`);
+    return ok;
+  });
+  console.log(`✅ 유효 문제 ${VALIDATED_QUIZ_DATA.length}개 준비 완료 (고유 영상 ${uniqueIds.length}개 검사)`);
 }
 
 preCheckQuestions();
