@@ -70,6 +70,7 @@ const CATEGORY_AUDIO = {
   '브랜드': '/sounds/categories/브랜드.mp3',
   '예능': '/sounds/categories/예능.mp3',
   '유튜버': '/sounds/categories/유튜버.mp3'
+  '롤 챔피언': '/sounds/categories/롤챔피언.mp3'
 };
 const INTRO_AUDIO   = '/sounds/opening_intro.mp3'    // 설명 소리 (스킵 대상)
 const GO_AUDIO      = '/sounds/opening_go.mp3'       // 시작 소리 (항상 재생)
