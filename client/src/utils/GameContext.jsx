@@ -161,7 +161,10 @@ function reducer(state, action) {
     case 'CLEAR_CONNECTION_LOST':
       return { ...state, connectionLost: false }
     case 'RESET':
-      return { ...initialState }
+      // myId(내 소켓 id)는 소켓이 살아있는 한 유효하므로 방 나가기(RESET)에도 유지한다.
+      // (지우면 같은 소켓으로 방을 다시 만들 때 소켓 id가 안 바뀌어 myId가 복구되지 않아
+      //  '내가 방장인지'(me = players.find(id===myId)) 판별이 깨진다 — 방장/건너뛰기 버그)
+      return { ...initialState, myId: state.myId }
     default:
       return state
   }
