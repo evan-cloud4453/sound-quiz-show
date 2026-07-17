@@ -462,21 +462,20 @@ const RAW_QUIZ_DATA = [
 
 // 불쾌한 소리 (15개)
     // 검증 데이터
-    { id: 'ug001', category: '불쾌한 소리', youtubeId: 'Uv0e02DSuA0', youtubeStart: 0, youtubeEnd: 10, hint: '칠판을 손톱으로 긁는 소리', answers: ['칠판긁는소리', '손톱칠판', '칠판소리'], difficulty: 1 },
-    { id: 'ug002', category: '불쾌한 소리', youtubeId: 'j5a0W0UqIPk', youtubeStart: 30, youtubeEnd: 40, hint: '아기가 밤새 우는 소리', answers: ['아기울음', '아기울음소리', '갓난아기'], difficulty: 1 },
+    { id: 'ug001', category: '불쾌한 소리', youtubeId: 'Uv0e02DSuA0', youtubeStart: 0, youtubeEnd: 10, hint: '칠판을 손톱으로 긁는 소리', answers: ['칠판긁는소리', '손톱칠판', '칠판소리', '칠판'], difficulty: 1 },
+    { id: 'ug002', category: '불쾌한 소리', youtubeId: 'j5a0W0UqIPk', youtubeStart: 30, youtubeEnd: 40, hint: '아기가 밤새 우는 소리', answers: ['아기울음', '아기울음소리', '갓난아기', '아기'], difficulty: 1 },
     { id: 'ug003', category: '불쾌한 소리', youtubeId: 'FI4eKrSLJCE', youtubeStart: 0, youtubeEnd: 10, hint: '콧물 풀 때 요란하게', answers: ['코푸는소리', '콧물', '코풀기'], difficulty: 1 },
-    { id: 'ug004', category: '불쾌한 소리', youtubeId: 'V65PJnRnr4o', youtubeStart: 5, youtubeEnd: 15, hint: '음식 씹을 때 쩝쩝소리', answers: ['쩝쩝소리', '쩝쩝', '식사소리'], difficulty: 1 },
+    { id: 'ug004', category: '불쾌한 소리', youtubeId: 'V65PJnRnr4o', youtubeStart: 5, youtubeEnd: 15, hint: '음식 씹을 때 쩝쩝소리', answers: ['쩝쩝소리', '쩝쩝', '식사소리', '식사', '밥'], difficulty: 1 },
     { id: 'ug005', category: '불쾌한 소리', youtubeId: 'YAvo0X03uRE', youtubeStart: 0, youtubeEnd: 10, hint: '에취 재채기 소리', answers: ['재채기', '기침', '에취'], difficulty: 1 },
-    { id: 'ug006', category: '불쾌한 소리', youtubeId: 'ZBKSMqEzIpE', youtubeStart: 0, youtubeEnd: 10, hint: '꼬르륵 배에서 나는 소리', answers: ['배꼬르륵', '배고픔소리', '위장소리'], difficulty: 1 },
+    { id: 'ug006', category: '불쾌한 소리', youtubeId: 'ZBKSMqEzIpE', youtubeStart: 0, youtubeEnd: 10, hint: '꼬르륵 배에서 나는 소리', answers: ['배꼬르륵', '배고픔소리', '위장소리', '꼬르륵'], difficulty: 1 },
     { id: 'ug007', category: '불쾌한 소리', youtubeId: 'COaFOK0U0rU', youtubeStart: 0, youtubeEnd: 10, hint: '모기가 윙윙 날아다니는 소리', answers: ['모기', '모기소리', 'mosquito'], difficulty: 1 },
     { id: 'ug008', category: '불쾌한 소리', youtubeId: 'E7SbmU1yFB4', youtubeStart: 0, youtubeEnd: 10, hint: '삐이이이 귀에 박히는 소음', answers: ['하울링', '마이크하울링', '귀울림'], difficulty: 2 },
-    { id: 'ug009', category: '불쾌한 소리', youtubeId: 'WPRJqHGJbnU', youtubeStart: 11, youtubeEnd: 21, hint: '드릴로 벽을 뚫는 공사 소리', answers: ['드릴소리', '공사소리', '착암기'], difficulty: 1 },
+    { id: 'ug009', category: '불쾌한 소리', youtubeId: 'WPRJqHGJbnU', youtubeStart: 11, youtubeEnd: 21, hint: '드릴로 벽을 뚫는 공사 소리', answers: ['드릴소리', '공사소리', '착암기', '드릴', '공사장'], difficulty: 1 },
     { id: 'ug010', category: '불쾌한 소리', youtubeId: 'lPiXeZkSX54', youtubeStart: 0, youtubeEnd: 10, hint: '옆 집에서 들리는 쿵쿵 발소리', answers: ['층간소음', '발소리', '쿵쿵소리'], difficulty: 1 },
     { id: 'ug011', category: '불쾌한 소리', youtubeId: 'KCZGO32QB1U', youtubeStart: 0, youtubeEnd: 10, hint: '트림 소리', answers: ['트림', '트림소리', 'burp'], difficulty: 1 },
-    { id: 'ug012', category: '불쾌한 소리', youtubeId: '7Og1aItvVac', youtubeStart: 0, youtubeEnd: 10, hint: '목이 쉬어서 나는 긁히는 소리', answers: ['목쉰소리', '쉰목소리', '목이쉬는소리'], difficulty: 2 },
     { id: 'ug013', category: '불쾌한 소리', youtubeId: 'dirG2XTAdOU', youtubeStart: 5, youtubeEnd: 15, hint: '형광등이 깜빡이며 내는 소리', answers: ['형광등소리', '전등소음', '조명소음'], difficulty: 2 },
-    { id: 'ug014', category: '불쾌한 소리', youtubeId: '_4AGeFZQ6io', youtubeStart: 0, youtubeEnd: 10, hint: '이갈이 소리', answers: ['이갈이', '이빨가는소리', '수면이갈이'], difficulty: 2 },
-    { id: 'ug015', category: '불쾌한 소리', youtubeId: 'I7u16bjq5lQ', youtubeStart: 30, youtubeEnd: 40, hint: '스티로폼 자르는 소리', answers: ['스티로폼소리', '스티로폼자르기', '발포스티렌'], difficulty: 1 },
+    { id: 'ug014', category: '불쾌한 소리', youtubeId: '_4AGeFZQ6io', youtubeStart: 0, youtubeEnd: 10, hint: '이갈이 소리', answers: ['이갈이', '이가는소리', '수면이갈이'], difficulty: 2 },
+    { id: 'ug015', category: '불쾌한 소리', youtubeId: 'I7u16bjq5lQ', youtubeStart: 30, youtubeEnd: 40, hint: '스티로폼 자르는 소리', answers: ['스티로폼소리', '스티로폼자르기', '발포스티렌', '스티로폼'], difficulty: 1 },
 
 // 브랜드 (21개)
 
@@ -861,20 +860,16 @@ const RAW_QUIZ_DATA = [
     { id: 'jb003', category: '직업', youtubeId: 'RKy2rKxXOBE', youtubeStart: 0, youtubeEnd: 10, hint: '비행기를 모는 사람', answers: ['파일럿', '조종사', 'pilot'], difficulty: 1 },
     { id: 'jb004', category: '직업', youtubeId: 'xDStrQZbxdw', youtubeStart: 5, youtubeEnd: 15, hint: '음식을 만드는 사람', answers: ['요리사', '셰프', 'chef'], difficulty: 1 },
     { id: 'jb005', category: '직업', youtubeId: 'HKieGUH9pzg', youtubeStart: 3, youtubeEnd: 13, hint: '법을 집행하는 사람', answers: ['경찰', '경찰관', 'police'], difficulty: 1 },
-    { id: 'jb006', category: '직업', youtubeId: 'PsQkvxfEwkk', youtubeStart: 10, youtubeEnd: 20, hint: '건물을 짓는 사람', answers: ['건축가', '건설노동자', 'builder'], difficulty: 1 },
     { id: 'jb007', category: '직업', youtubeId: 'ASRclsj-zQU', youtubeStart: 28, youtubeEnd: 38, hint: '아이들을 가르치는 사람', answers: ['선생님', '교사', 'teacher'], difficulty: 1 },
     { id: 'jb008', category: '직업', youtubeId: 'S37VpkZTYcU', youtubeStart: 1, youtubeEnd: 11, hint: '우주를 탐험하는 사람', answers: ['우주비행사', '우주인', 'astronaut'], difficulty: 1 },
     { id: 'jb009', category: '직업', youtubeId: 'gNw50HGCNJQ', youtubeStart: 40, youtubeEnd: 50, hint: '물고기를 잡는 사람', answers: ['어부', '어선선원', 'fisherman'], difficulty: 1 },
     { id: 'jb010', category: '직업', youtubeId: 'ku2SXJHANNM', youtubeStart: 114, youtubeEnd: 124, hint: '재판을 진행하는 사람', answers: ['판사', 'judge'], difficulty: 2 },
     { id: 'jb011', category: '직업', youtubeId: 'J3Bkd_XFJzY', youtubeStart: 10, youtubeEnd: 20, hint: '아픈 동물을 치료하는 사람', answers: ['수의사', 'vet', '동물의사'], difficulty: 1 },
-    { id: 'jb012', category: '직업', youtubeId: 'gNw50HGCNJQ', youtubeStart: 50, youtubeEnd: 60, hint: '배를 운전하는 사람', answers: ['선장', '항해사', 'captain'], difficulty: 1 },
-    { id: 'jb013', category: '직업', youtubeId: 'PsQkvxfEwkk', youtubeStart: 30, youtubeEnd: 40, hint: '광산에서 일하는 사람', answers: ['광부', '광산노동자', 'miner'], difficulty: 2 },
     { id: 'jb014', category: '직업', youtubeId: 'NYHzq7VnUJE', youtubeStart: 3, youtubeEnd: 13, hint: '사진을 찍는 사람', answers: ['사진작가', '포토그래퍼', 'photographer'], difficulty: 1 },
     { id: 'jb015', category: '직업', youtubeId: 'dtn_hy6BHhk', youtubeStart: 1, youtubeEnd: 11, hint: '뉴스를 전달하는 사람', answers: ['아나운서', '기자', '뉴스앵커'], difficulty: 1 },
 
     // 신규 데이터
     { id: 'jb016', category: '직업', youtubeId: 'X3T2HWLxSxk', youtubeStart: 15, youtubeEnd: 27, hint: '비행기 안에서 서비스를 제공하는 직업, 공중에서 일해요', answers: ['승무원', '항공 승무원', 'flight attendant', '캐빈크루'], difficulty: 1 },
-    { id: 'jb017', category: '직업', youtubeId: 'eFTLKWw542g', youtubeStart: 10, youtubeEnd: 22, hint: '인터넷 방송과 영상으로 콘텐츠를 만들어 구독자와 소통하는 직업', answers: ['유튜버', '크리에이터', 'youtuber', '유튜브 크리에이터'], difficulty: 1 },
     { id: 'jb019', category: '직업', youtubeId: 'K2cUkFZNTd4', youtubeStart: 15, youtubeEnd: 27, hint: '전기 배선을 설치하고 수리하는 기술 직업', answers: ['전기기사', '전기공', '전기 기사', 'electrician'], difficulty: 2 },
     { id: 'jb022', category: '직업', youtubeId: 'G-AhU0vpJVo', youtubeStart: 15, youtubeEnd: 27, hint: '법정에서 의뢰인의 권리를 대변하고 법률 서비스를 제공하는 직업', answers: ['변호사', '법무사', 'lawyer', 'attorney'], difficulty: 1 },
     { id: 'jb024', category: '직업', youtubeId: 'h0AYBGZ3rjE', youtubeStart: 10, youtubeEnd: 22, hint: '글로 이야기를 창조하고 책을 집필하는 직업', answers: ['작가', '소설가', 'author', 'writer', '문인'], difficulty: 1 },
@@ -885,7 +880,6 @@ const RAW_QUIZ_DATA = [
     { id: 'jb032', category: '직업', youtubeId: 'ggRuEd2cMks', youtubeStart: 15, youtubeEnd: 27, hint: '식물을 가꾸고 정원을 아름답게 꾸미는 직업', answers: ['조경사', '정원사', 'gardener', '조경가'], difficulty: 2 },
     { id: 'jb033', category: '직업', youtubeId: 'JdAr-I5MLQY', youtubeStart: 15, youtubeEnd: 27, hint: '패션 의상을 창조적으로 설계하고 만드는 직업', answers: ['패션 디자이너', '패션디자이너', 'fashion designer'], difficulty: 1 },
     { id: 'jb034', category: '직업', youtubeId: 'Fl0WwLdmVmE', youtubeStart: 15, youtubeEnd: 27, hint: '잇몸과 치아를 전문으로 치료하고 관리하는 의학 전문가', answers: ['치과의사', '치과 의사', 'dentist'], difficulty: 1 },
-    { id: 'jb035', category: '직업', youtubeId: 'xNRJwmlRBNU', youtubeStart: 15, youtubeEnd: 27, hint: '건강한 음식을 추천하고 식단을 관리하는 의료 전문가', answers: ['영양사', '영양 전문가', 'nutritionist', 'dietitian'], difficulty: 2 },
     { id: 'jb041', category: '직업', youtubeId: 'lIs8HyG-tko', youtubeStart: 15, youtubeEnd: 27, hint: '커피와 음료를 만들고 고객에게 제공하는 카페 직업', answers: ['바리스타', 'barista'], difficulty: 1 },
     { id: 'jb042', category: '직업', youtubeId: 'Wh1BG-2I8pc', youtubeStart: 15, youtubeEnd: 27, hint: '무대와 카메라 앞에서 연기하는 예술 직업', answers: ['배우', '액터', 'actor', 'actress'], difficulty: 1 },
     { id: 'jb044', category: '직업', youtubeId: 'mGxbBQNhbBE', youtubeStart: 15, youtubeEnd: 27, hint: '국가를 대표하여 외교 활동을 하는 직업', answers: ['외교관', '대사', 'diplomat', 'ambassador'], difficulty: 2 },
