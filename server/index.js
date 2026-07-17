@@ -113,19 +113,27 @@ function getRandomQuestions(count = 10, categories = [], seenCounts = null) {
   //   → 풀 전체를 한 바퀴 돌기 전엔 재등장 없음. 풀이 작아도 절대 고갈되지 않음.
   //   seenCounts 는 방 단위 Map(문제id → 나온 횟수), 방이 사라지면 함께 소멸.
   const seen = seenCounts instanceof Map ? seenCounts : new Map();
-  const ordered = [...pool].sort(() => Math.random() - 0.5);         // 1) 먼저 랜덤 섞기
+  // 1) 먼저 균등 랜덤 셔플 (Fisher-Yates).
+  //    ※ sort(() => Math.random()-0.5) 는 균등 셔플이 아니라 원소가 원래 위치 근처에 남는다.
+  //      quizData 는 카테고리별로 뭉쳐 저장돼 있어, 그 방식은 같은 주제가 통째로 몰려 나왔다.
+  const ordered = [...pool];
+  for (let i = ordered.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+  }
   ordered.sort((a, b) => (seen.get(a.id) || 0) - (seen.get(b.id) || 0)); // 2) 안정정렬: 적게 나온 순 (동률은 랜덤 유지)
 
   const target = Math.min(count, pool.length);
 
   // ★ 한 게임 안에서의 '쏠림' 상한 (LFU 순서는 그대로 유지한 채 필터만 적용)
-  //   - 같은 영상(youtubeId): 1회. 여러 문제가 한 영상을 공유하는 경우(예: 롤 챔피언은
-  //     162문제가 동일 영상) 같은 소리를 두 번 듣게 되는 걸 막는다.
-  //   - 같은 주제(category): max(2, ceil(라운드/주제수)). 주제를 적게 고르면 자동으로 완화되어
+  //   - 같은 영상(youtubeId): 3회까지 허용. 한 영상을 여러 문제가 공유해도(예: 롤 챔피언
+  //     162문제가 동일 영상) 구간이 달라 문제로서는 별개이므로 과도하게 막지 않는다.
+  //     (36개 영상은 여러 카테고리에 걸쳐 있어 이 상한이 실제로 작동한다)
+  //   - 같은 주제(category): max(3, ceil(라운드/주제수)). 주제를 적게 고르면 자동으로 완화되어
   //     (주제 1개만 고르면 상한이 라운드 수가 되어 사실상 해제) 정상 동작한다.
   const catCount = new Set(pool.map(q => q.category)).size;
-  const CATEGORY_CAP = Math.max(2, Math.ceil(target / Math.max(1, catCount)));
-  const VIDEO_CAP    = 1;
+  const CATEGORY_CAP = Math.max(3, Math.ceil(target / Math.max(1, catCount)));
+  const VIDEO_CAP    = 3;
 
   const picked = [];
   const usedCat = new Map();
