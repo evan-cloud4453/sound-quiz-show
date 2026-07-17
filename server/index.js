@@ -113,9 +113,44 @@ function getRandomQuestions(count = 10, categories = [], seenCounts = null) {
   //   → 풀 전체를 한 바퀴 돌기 전엔 재등장 없음. 풀이 작아도 절대 고갈되지 않음.
   //   seenCounts 는 방 단위 Map(문제id → 나온 횟수), 방이 사라지면 함께 소멸.
   const seen = seenCounts instanceof Map ? seenCounts : new Map();
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);         // 1) 먼저 랜덤 섞기
-  shuffled.sort((a, b) => (seen.get(a.id) || 0) - (seen.get(b.id) || 0)); // 2) 안정정렬: 적게 나온 순 (동률은 랜덤 유지)
-  return shuffled.slice(0, Math.min(count, pool.length));
+  const ordered = [...pool].sort(() => Math.random() - 0.5);         // 1) 먼저 랜덤 섞기
+  ordered.sort((a, b) => (seen.get(a.id) || 0) - (seen.get(b.id) || 0)); // 2) 안정정렬: 적게 나온 순 (동률은 랜덤 유지)
+
+  const target = Math.min(count, pool.length);
+
+  // ★ 한 게임 안에서의 '쏠림' 상한 (LFU 순서는 그대로 유지한 채 필터만 적용)
+  //   - 같은 영상(youtubeId): 1회. 여러 문제가 한 영상을 공유하는 경우(예: 롤 챔피언은
+  //     162문제가 동일 영상) 같은 소리를 두 번 듣게 되는 걸 막는다.
+  //   - 같은 주제(category): max(2, ceil(라운드/주제수)). 주제를 적게 고르면 자동으로 완화되어
+  //     (주제 1개만 고르면 상한이 라운드 수가 되어 사실상 해제) 정상 동작한다.
+  const catCount = new Set(pool.map(q => q.category)).size;
+  const CATEGORY_CAP = Math.max(2, Math.ceil(target / Math.max(1, catCount)));
+  const VIDEO_CAP    = 1;
+
+  const picked = [];
+  const usedCat = new Map();
+  const usedVid = new Map();
+
+  for (const q of ordered) {
+    if (picked.length >= target) break;
+    if ((usedCat.get(q.category)  || 0) >= CATEGORY_CAP) continue;
+    if ((usedVid.get(q.youtubeId) || 0) >= VIDEO_CAP)    continue;
+    picked.push(q);
+    usedCat.set(q.category,  (usedCat.get(q.category)  || 0) + 1);
+    usedVid.set(q.youtubeId, (usedVid.get(q.youtubeId) || 0) + 1);
+  }
+
+  // 상한 때문에 라운드 수를 못 채웠으면(예: 주제/영상이 몇 개 없는 경우) 상한을 풀고 채운다.
+  if (picked.length < target) {
+    const chosen = new Set(picked.map(q => q.id));
+    for (const q of ordered) {
+      if (picked.length >= target) break;
+      if (chosen.has(q.id)) continue;
+      picked.push(q);
+      chosen.add(q.id);
+    }
+  }
+  return picked;
 }
 
 function normalise(text) {
