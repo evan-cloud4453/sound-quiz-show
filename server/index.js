@@ -358,7 +358,7 @@ io.on('connection', (socket) => {
           status:               'WAITING',
           currentRound:         0,
           totalRounds:          ROUND_COUNT,
-          targetScore:          5,
+          targetScore:          20,   // ★ 순위 점수제 기본 목표(10/20/30/40/50 중)
           roundCount:           ROUND_COUNT,
           selectedCategories:   [],
           questions:            [],
@@ -455,7 +455,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('start_game', ({ targetScore = 5, roundCount = ROUND_COUNT, categories = [], autoSkipOpening = false, fromRematch = false } = {}, cb) => {
+  socket.on('start_game', ({ targetScore = 20, roundCount = ROUND_COUNT, categories = [], autoSkipOpening = false, fromRematch = false } = {}, cb) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room)                     return cb?.({ error: '방을 찾을 수 없습니다.' });
@@ -592,12 +592,12 @@ io.on('connection', (socket) => {
         const gained = rankPoints(rankIndex, room);
         player.score += gained;
 
-        // 초록 말풍선(전원) + 점수 즉시 갱신(전원)
-        io.to(room.code).emit('player_guess', {
+        // ★ 정답은 '텍스트를 노출하지 않고' 맞혔다는 사실만 방송(따라치기 방지).
+        //   클라는 해당 플레이어 부스에 초록 오버레이 + 순위를 표시한다.
+        io.to(room.code).emit('player_scored', {
           playerId: socket.id,
           nickname: player.nickname,
-          text:     String(answer).slice(0, 40),
-          correct:  true
+          rank:     rankIndex + 1
         });
         io.to(room.code).emit('room_update', getRoomState(room));
 

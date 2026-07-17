@@ -73,7 +73,8 @@ export function useSocket() {
       'back_to_lobby',  // ★ 게임 종료 후 대기방 복귀
       'skip_opening',   // ★ 방장의 오프닝 안내방송 스킵
       'kicked',         // ★ 강퇴 당함
-      'player_guess',   // ★ 제출한 정답 실시간 말풍선
+      'player_guess',   // ★ 제출한 정답 실시간 말풍선(오답만 텍스트 표시)
+      'player_scored',  // ★ 정답 처리(텍스트 없이 '맞혔음'만 — 부스 초록 표시)
       'round_result'    // ★ 라운드 종료 + 정답자 순위 요약
     ]
 

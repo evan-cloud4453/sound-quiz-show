@@ -18,7 +18,7 @@ const initialState = {
   players: [],
   hostId: null,
   gameStatus: 'WAITING',
-  targetScore: 5,
+  targetScore: 20,
   maxPlayers: 5,             // ★ 방 최대 인원 (방 생성 시 5~15, 기본 5)
 
   // ★ 게임 설정

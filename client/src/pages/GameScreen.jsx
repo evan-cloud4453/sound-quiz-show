@@ -123,6 +123,7 @@ export default function GameScreen() {
   const [answersOpen,   setAnswersOpen]   = useState(false)   // ★ 서버가 정답 접수를 연 뒤에만 true
   const [submitted,     setSubmitted]     = useState(false)
   const [myScored,      setMyScored]      = useState(false)   // ★ 이번 라운드에 내가 정답 처리됨(입력 잠금)
+  const [scoredMap,     setScoredMap]     = useState({})      // ★ { playerId: 순위 } 이번 라운드 정답자(부스 초록 표시)
   const [flashWrong,    setFlashWrong]    = useState(false)
   const [phaseLabel,    setPhaseLabel]    = useState('접속 대기 중...')
   const [showResult,    setShowResult]    = useState(false)
@@ -210,8 +211,6 @@ export default function GameScreen() {
     const unsub = on('player_guess', ({ playerId, text, correct }) => {
       const key = `${Date.now()}-${Math.random()}`
       setBubbles(prev => ({ ...prev, [playerId]: { text, correct, key } }))
-      // ★ 내가 정답을 맞혔으면 입력 잠금(라운드는 계속 진행됨)
-      if (correct && playerId === myId) setMyScored(true)
       clearTimeout(bubbleTimersRef.current[playerId])
       bubbleTimersRef.current[playerId] = setTimeout(() => {
         setBubbles(prev => {
@@ -225,9 +224,19 @@ export default function GameScreen() {
     return unsub
   }, [on, myId])
 
-  // 라운드가 바뀌면 말풍선 초기화
+  // ★ 정답 처리 수신 (텍스트 없음 — 누가 맞혔는지만). 부스 초록 표시 + 본인이면 입력 잠금.
+  useEffect(() => {
+    const unsub = on('player_scored', ({ playerId, rank }) => {
+      setScoredMap(prev => ({ ...prev, [playerId]: rank }))
+      if (playerId === myId) setMyScored(true)
+    })
+    return unsub
+  }, [on, myId])
+
+  // 라운드가 바뀌면 말풍선/정답표시 초기화
   useEffect(() => {
     setBubbles({})
+    setScoredMap({})
     Object.values(bubbleTimersRef.current).forEach(clearTimeout)
     bubbleTimersRef.current = {}
   }, [currentRound])
@@ -674,20 +683,22 @@ export default function GameScreen() {
         </div>
       )}
 
-      {/* 결과 오버레이 (라운드 종료 — 정답자 순위) */}
+      {/* 결과 오버레이 (라운드 종료 — 정답 공개 + 정답자 순위) */}
       {showResult && lastResult?.roundOver && (
         <div className="result-overlay show">
           {lastResult.noWinner ? (
             <div className="result-banner timeout animate-scaleIn">
               <div className="result-icon">⏰</div>
               <div className="result-text">아무도 못 맞혔어요</div>
-              <div className="result-answer">정답: {lastResult.answer}</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', letterSpacing: '0.1em' }}>정답</div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 900 }} className="glow-cyan">{lastResult.answer}</div>
             </div>
           ) : (
             <div className="result-banner correct animate-scaleIn">
-              <div className="result-icon">🎯</div>
-              <div className="result-answer" style={{ marginBottom: 6 }}>정답: {lastResult.answer}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 200 }}>
+              {/* ★ 정답 공개(크게) */}
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', letterSpacing: '0.1em' }}>🎬 정답</div>
+              <div style={{ fontSize: '1.9rem', fontWeight: 900, marginBottom: 8 }} className="glow-cyan">{lastResult.answer}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 220 }}>
                 {(lastResult.ranking || []).map((r, i) => (
                   <div key={i} style={{
                     display: 'flex', justifyContent: 'space-between', gap: 14,
@@ -828,6 +839,8 @@ export default function GameScreen() {
           {players.map(p => {
             const isMe     = p.id === myId || p.nickname === nickname
             const isWinner = lastResult?.roundOver && lastResult?.ranking?.[0]?.nickname === p.nickname
+            const scored   = scoredMap[p.id]                 // 이번 라운드 정답 순위(있으면 맞힌 것)
+            const hot      = isWinner || scored != null      // 초록 강조 여부
             const bubble   = bubbles[p.id]
             return (
               <div
@@ -868,17 +881,31 @@ export default function GameScreen() {
                   </div>
                 )}
 
+                {/* ★ 정답 처리 배지 (텍스트 없이 순위만 — 따라치기 방지) */}
+                {scored != null && (
+                  <div style={{
+                    position: 'absolute', top: -8, right: -6, zIndex: 25,
+                    background: 'linear-gradient(135deg,#34d399,#22c55e)', color: '#052e16',
+                    fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: 999,
+                    boxShadow: '0 0 12px rgba(34,197,94,0.6)'
+                  }}>
+                    ✓ {scored}등
+                  </div>
+                )}
+
                 {/* 카드 */}
                 <div style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
                   minHeight: 118, height: '100%',
                   padding: '14px 8px', borderRadius: 14,
-                  background: isMe ? 'rgba(124,58,237,0.18)' : 'rgba(255,255,255,0.05)',
-                  border: isWinner
+                  background: hot
+                    ? 'rgba(34,197,94,0.18)'
+                    : (isMe ? 'rgba(124,58,237,0.18)' : 'rgba(255,255,255,0.05)'),
+                  border: hot
                     ? '1.5px solid #22c55e'
                     : (isMe ? '1px solid rgba(124,58,237,0.6)' : '1px solid rgba(255,255,255,0.10)'),
-                  boxShadow: isWinner ? '0 0 16px rgba(34,197,94,0.5)' : 'none',
-                  transition: 'border 0.2s, box-shadow 0.2s',
+                  boxShadow: hot ? '0 0 16px rgba(34,197,94,0.5)' : 'none',
+                  transition: 'background 0.2s, border 0.2s, box-shadow 0.2s',
                   opacity: p.disconnected ? 0.5 : 1
                 }}>
                   <div style={{ fontSize: '1.6rem', lineHeight: 1 }}>{p.avatar || getAvatar(p.id)}</div>
