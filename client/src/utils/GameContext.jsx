@@ -135,12 +135,20 @@ function reducer(state, action) {
     case 'HINT_REVEALED':
       return { ...state, hint: action.data.hint || '' }
     case 'ANSWER_RESULT':
+      // 이제 오답 개인 통지(correct:false)에만 쓰인다. 라운드 종료는 ROUND_RESULT.
       return {
         ...state,
         lastResult: action.data,
         roundActive: action.data.correct || action.data.noWinner || action.data.winnerId
           ? false
           : state.roundActive
+      }
+    case 'ROUND_RESULT':
+      // ★ 라운드 종료(순위 요약). 라운드 비활성화 + 결과 오버레이용 데이터 저장.
+      return {
+        ...state,
+        lastResult: { ...action.data, roundOver: true },
+        roundActive: false
       }
     case 'GAME_OVER':
       return {
@@ -223,6 +231,7 @@ export function GameProvider({ children }) {
       on('round_start',  data => dispatch({ type: 'ROUND_START',  data })),
       on('hint_revealed', data => dispatch({ type: 'HINT_REVEALED', data })),
       on('answer_result',data => dispatch({ type: 'ANSWER_RESULT',data })),
+      on('round_result', data => dispatch({ type: 'ROUND_RESULT', data })),
       on('game_over',    data => dispatch({ type: 'GAME_OVER',    data })),
       on('chat_message', data => dispatch({ type: 'CHAT_MESSAGE', data })),   // ★ 채팅
       on('back_to_lobby', ()  => dispatch({ type: 'BACK_TO_LOBBY' })),        // ★ 대기방 복귀

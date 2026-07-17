@@ -4,6 +4,7 @@ const BONUS_PROB     = 0.2   // 보너스 퀴즈 발동 확률
 const BONUS_MAX      = 2      // 게임당 최대 발동 횟수
 const BONUS_MIN_DIFF = 1      // 보너스 대상 최소 난이도 (1 = 모든 문제 대상)
 const BONUS_MIN_ROUND = 5     // 보너스가 나올 수 있는 최소 라운드 (5 = 5라운드부터)
+const RANK_POINTS = [3, 2, 1] // ★ 정답 순위별 점수: 1등 3 / 2등 2 / 3등 이하 1 (보너스 라운드는 ×2)
 
 require('dotenv').config();
 const express = require('express');
@@ -297,22 +298,9 @@ function startRoundTimer(room) {
   clearTimeout(room.graceTimer);
   room.graceTimer = null;
 
-  const question = room.questions[room.currentRound - 1];
-
   room.roundTimer = setTimeout(() => {
     room.roundTimer = null;
-    if (room.answeredThisRound) return;
-    room.answeredThisRound = true;
-
-    io.to(room.code).emit('answer_result', {
-      correct:  false,
-      noWinner: true,
-      answer:   question?.answers?.[0] || '알 수 없음',
-      message:  '시간 초과! 아무도 맞추지 못했습니다.',
-      scores:   room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-    });
-
-    setTimeout(() => checkEndOrNextRound(room), 2500);
+    endRound(room);          // 시간 초과 → 라운드 종료(정답자 순위 요약 방송)
   }, ROUND_TIME_LIMIT * 1000);
 
   io.to(room.code).emit('timer_start', { timeLimit: ROUND_TIME_LIMIT });
@@ -378,6 +366,7 @@ io.on('connection', (socket) => {
           fallbackTimer:        null,
           answeredThisRound:    false,
           firstCorrectPlayerId: null,
+          correctPids:          [],
           musicStartedSockets:  new Set(),
           bonusUsed:            0,          // ★ 게임당 보너스 사용 횟수
           currentRoundBonus:    false,      // ★ 이번 라운드 보너스 여부
@@ -591,40 +580,31 @@ io.on('connection', (socket) => {
 
       const player = room.players.find(p => p.id === socket.id);
       if (!player || room.answeredThisRound)  return;
+      if (room.correctPids.includes(player.pid)) return;   // 이미 이 라운드 정답 처리됨
 
       const question = room.questions[room.currentRound - 1];
       if (!question) return;
 
       if (smartGrade(answer, question.answers)) {
-        room.answeredThisRound    = true;
-        room.firstCorrectPlayerId = socket.id;
-        clearRoomTimers(room);
-
-        const gained = room.currentRoundBonus ? 2 : 1;   // ★ 보너스면 2점
+        // ★ 순위별 점수: 정답 순서대로 1등 3 / 2등 2 / 3등 이하 1 (보너스 ×2)
+        const rankIndex = room.correctPids.length;
+        room.correctPids.push(player.pid);
+        const gained = rankPoints(rankIndex, room);
         player.score += gained;
 
-        // ★ 정답 말풍선(초록) 먼저 모두에게 표시
+        // 초록 말풍선(전원) + 점수 즉시 갱신(전원)
         io.to(room.code).emit('player_guess', {
           playerId: socket.id,
           nickname: player.nickname,
           text:     String(answer).slice(0, 40),
           correct:  true
         });
+        io.to(room.code).emit('room_update', getRoomState(room));
 
-        // ★ 0.8초 뒤 정답 공개 이펙트 (초록 말풍선이 잠깐 보이고 넘어가게)
-        setTimeout(() => {
-          io.to(room.code).emit('room_update', getRoomState(room));
-          io.to(room.code).emit('answer_result', {
-            correct:        true,
-            winnerId:       socket.id,
-            winnerNickname: player.nickname,
-            answer:         question.answers[0],
-            points:         gained,                          // ★ 획득 점수
-            isBonus:        room.currentRoundBonus,           // ★ 보너스 여부
-            scores:         room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-          });
-          setTimeout(() => checkEndOrNextRound(room), 2500);
-        }, 800);
+        // 접속 중 전원이 맞혔으면 라운드 조기 종료(초록 말풍선 잠깐 보이고)
+        const activePids = room.players.filter(p => !p.disconnected).map(p => p.pid);
+        const allAnswered = activePids.every(pid => room.correctPids.includes(pid));
+        if (allAnswered) setTimeout(() => endRound(room), 800);
       } else {
         // ★ 오답 말풍선(일반색)도 모두에게 표시
         io.to(room.code).emit('player_guess', {
@@ -651,20 +631,7 @@ io.on('connection', (socket) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room || room.status !== 'PLAYING' || room.answeredThisRound) return;
-
-      room.answeredThisRound = true;
-      clearRoomTimers(room);
-
-      const q = room.questions[room.currentRound - 1];
-      io.to(room.code).emit('answer_result', {
-        correct:  false,
-        noWinner: true,
-        answer:   q?.answers?.[0] || '알 수 없음',
-        message:  '영상을 재생할 수 없어 스킵했습니다.',
-        scores:   room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
-      });
-
-      setTimeout(() => checkEndOrNextRound(room), 2500);
+      endRound(room);   // 영상 재생 불가 → 라운드 종료(정답자 있으면 그 순위 반영)
     } catch (e) {
       console.error(e);
     }
@@ -778,6 +745,7 @@ io.on('connection', (socket) => {
       room.questions           = [];
       room.answeredThisRound   = false;
       room.firstCorrectPlayerId = null;
+      room.correctPids         = [];
       room.musicStartedSockets = new Set();
       room.players.forEach(p => { p.score = 0; p.isReady = false; p.isAudioUnlocked = false; });
       room.phase = 'lobby';          // ★ 복구 단계
@@ -911,6 +879,7 @@ function startRound(room) {
   room.currentRound         += 1;
   room.answeredThisRound    = false;
   room.firstCorrectPlayerId = null;
+  room.correctPids          = [];          // ★ 이번 라운드 정답자 pid (순위순)
   room.musicStartedSockets  = new Set();
 
   const question = room.questions[room.currentRound - 1];
@@ -950,6 +919,36 @@ function startRound(room) {
       startRoundTimer(room);
     }
   }, fallbackDelay);
+}
+
+// 정답 순위(0-based)에 따른 점수 (보너스 라운드면 ×2)
+function rankPoints(rankIndex, room) {
+  const base = RANK_POINTS[Math.min(rankIndex, RANK_POINTS.length - 1)];
+  return room.currentRoundBonus ? base * 2 : base;
+}
+
+// 라운드 종료: 순위 요약 방송 후 다음 라운드/게임 종료 판정. (중복 호출 안전)
+function endRound(room) {
+  if (room.answeredThisRound) return;
+  room.answeredThisRound = true;
+  clearRoomTimers(room);
+
+  const question = room.questions[room.currentRound - 1];
+  const ranking = room.correctPids.map((pid, i) => {
+    const p = room.players.find(pp => pp.pid === pid);
+    return p ? { nickname: p.nickname, points: rankPoints(i, room) } : null;
+  }).filter(Boolean);
+
+  io.to(room.code).emit('room_update', getRoomState(room));
+  io.to(room.code).emit('round_result', {
+    answer:   question?.answers?.[0] || '알 수 없음',
+    ranking,                                   // 순위순 [{ nickname, points }]
+    noWinner: ranking.length === 0,
+    isBonus:  room.currentRoundBonus,
+    scores:   room.players.map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
+  });
+
+  setTimeout(() => checkEndOrNextRound(room), 2500);
 }
 
 function checkEndOrNextRound(room) {
