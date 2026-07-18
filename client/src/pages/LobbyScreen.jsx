@@ -33,16 +33,17 @@ export default function LobbyScreen() {
   const [maxPlayersInput, setMaxPlayersInput] = useState(maxPlayers || 5) // ★ 설정에서 최대 인원 조절
   const [showSettings, setShowSettings] = useState(false)
   const [showCatPop, setShowCatPop] = useState(false)   // ★ 주제 팝오버(hover/tap)
-  const [catPopPos, setCatPopPos] = useState({ top: 0, left: 0 })
+  const [catPopPos, setCatPopPos] = useState({ left: 0, bottom: 0 })
   const catPopTimer = useRef(null)
   const catChipRef = useRef(null)
 
-  // 팝오버를 트리거 칩 위치 기준으로 fixed 로 띄운다(부모 overflow/쌓임에 안 가리게).
+  // 팝오버를 트리거 칩 '위쪽'에 fixed 로 띄운다(부모 overflow/쌓임·아래 패널에 안 가리게).
   const openCatPop = (autoHide) => {
     const el = catChipRef.current
     if (el) {
       const r = el.getBoundingClientRect()
-      setCatPopPos({ top: r.bottom + 8, left: r.left + r.width / 2 })
+      // bottom 기준으로 칩 위에 배치 → 위로 자라남
+      setCatPopPos({ left: r.left + r.width / 2, bottom: window.innerHeight - r.top + 8 })
     }
     setShowCatPop(true)
     clearTimeout(catPopTimer.current)
@@ -178,11 +179,11 @@ export default function LobbyScreen() {
               onClick={() => openCatPop(true)}
             >
               <div className="info-chip" style={{ cursor: 'pointer' }}>
-                🎵 {(ctxCats && ctxCats.length) ? `${ctxCats.length}개 주제` : '전체 주제'}
+                {(ctxCats && ctxCats.length) ? `${ctxCats.length}개 주제` : '전체 주제'}
               </div>
               {showCatPop && (
                 <div style={{
-                  position: 'fixed', top: catPopPos.top, left: catPopPos.left, transform: 'translateX(-50%)',
+                  position: 'fixed', left: catPopPos.left, bottom: catPopPos.bottom, transform: 'translateX(-50%)',
                   zIndex: 9999, width: 'max-content', maxWidth: 'min(280px, 90vw)',
                   background: 'rgba(10,12,24,0.98)', border: '1px solid rgba(255,255,255,0.15)',
                   borderRadius: 12, padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.55)'
