@@ -564,7 +564,8 @@ export default function GameScreen() {
 
   const handleKey = (e) => { if (e.key === 'Enter') handleSubmit() }
 
-  const progressPct = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
+  // 진행바: 현재 라운드 기준으로 채워 마지막 라운드에 100%가 되게 (currentRound/totalRounds)
+  const progressPct = totalRounds > 0 ? Math.min(100, (currentRound / totalRounds) * 100) : 0
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
@@ -898,7 +899,7 @@ export default function GameScreen() {
                     fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: 999,
                     boxShadow: '0 0 12px rgba(34,197,94,0.6)'
                   }}>
-                    ✓ {scored}등
+                    {scored}등
                   </div>
                 )}
 
