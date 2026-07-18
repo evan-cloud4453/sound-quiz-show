@@ -9,7 +9,8 @@ export default function LobbyScreen() {
   const {
     roomCode, players, hostId, myId, nickname,
     availableCategories, chatMessages, maxPlayers,
-    targetScore: ctxTargetScore, roundCount: ctxRoundCount, selectedCategories: ctxCats
+    targetScore: ctxTargetScore, roundCount: ctxRoundCount, selectedCategories: ctxCats,
+    roundTime: ctxRoundTime
   } = state
 
   // ── 설정 (방장이 모달에서 조정) ──
@@ -27,11 +28,20 @@ export default function LobbyScreen() {
     }
   }
   const [selectedCats, setSelectedCats] = useState(ctxCats || [])
+  const [roundTimeSel, setRoundTimeSel] = useState(ctxRoundTime || 15) // ★ 라운드당 시간(초)
+  const ROUND_TIME_OPTIONS = [10, 15, 20, 30, 45]
   const [maxPlayersInput, setMaxPlayersInput] = useState(maxPlayers || 5) // ★ 설정에서 최대 인원 조절
   const [showSettings, setShowSettings] = useState(false)
+  const [showCatPop, setShowCatPop] = useState(false)   // ★ 주제 팝오버(hover/tap)
+  const catPopTimer = useRef(null)
 
-  // 설정창을 열 때 현재 방 최대 인원을 반영 (다른 값으로 갱신됐을 수 있으므로)
-  useEffect(() => { if (showSettings) setMaxPlayersInput(maxPlayers || 5) }, [showSettings, maxPlayers])
+  // 설정창을 열 때 현재 방 값 반영 (다른 값으로 갱신됐을 수 있으므로)
+  useEffect(() => {
+    if (showSettings) {
+      setMaxPlayersInput(maxPlayers || 5)
+      setRoundTimeSel(ctxRoundTime || 15)
+    }
+  }, [showSettings, maxPlayers, ctxRoundTime])
 
   const [copied, setCopied]   = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
@@ -76,13 +86,13 @@ export default function LobbyScreen() {
   const handleStart = async () => {
     if (starting) return
     setStarting(true)
-    await startGame({ targetScore, roundCount, categories: selectedCats })
+    await startGame({ targetScore, roundCount, roundTime: roundTimeSel, categories: selectedCats })
     setStarting(false)
   }
 
   // 설정창 닫을 때 서버에 현재 설정을 알려 다른 유저도 보이게 함
   const closeSettings = () => {
-    updateSettings({ targetScore, roundCount, categories: selectedCats, maxPlayers: maxPlayersInput })
+    updateSettings({ targetScore, roundCount, roundTime: roundTimeSel, categories: selectedCats, maxPlayers: maxPlayersInput })
     setShowSettings(false)
   }
 
@@ -140,12 +150,60 @@ export default function LobbyScreen() {
         </div>
 
         <div className="lobby-body">
-          {/* ★ 게임 정보 요약 (박스 없이) + 설정 버튼 */}
+          {/* ★ 게임 정보 요약 (박스 없이) + 설정 버튼. 방 상태(ctx) 기준이라 전원에게 동일하게 보임 */}
           <div className="setting-info animate-fadeInUp" style={{ justifyContent: 'center', animationDelay: '0.05s' }}>
-            <div className="info-chip">목표 {targetScore}점</div>
-            <div className="info-chip">{roundCount}라운드</div>
-            {currentIsHost && <div className="info-chip">{catSummary}</div>}
-            <div className="info-chip">라운드당 15초</div>
+            <div className="info-chip">목표 {ctxTargetScore || targetScore}점</div>
+            <div className="info-chip">{ctxRoundCount || roundCount}라운드</div>
+            <div className="info-chip">라운드당 {ctxRoundTime || 15}초</div>
+
+            {/* 주제 칩 + 팝오버 (전원 표시): 데스크톱 hover / 모바일 tap 시 선택된 주제 목록 표시 */}
+            <div
+              style={{ position: 'relative' }}
+              onMouseEnter={() => setShowCatPop(true)}
+              onMouseLeave={() => setShowCatPop(false)}
+              onClick={() => {
+                setShowCatPop(true)
+                clearTimeout(catPopTimer.current)
+                catPopTimer.current = setTimeout(() => setShowCatPop(false), 2800)
+              }}
+            >
+              <div className="info-chip" style={{ cursor: 'pointer' }}>
+                🎵 {(ctxCats && ctxCats.length) ? `${ctxCats.length}개 주제` : '전체 주제'} ⌄
+              </div>
+              {showCatPop && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)',
+                  zIndex: 60, width: 'max-content', maxWidth: 280,
+                  background: 'rgba(10,12,24,0.97)', border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: 12, padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+                }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 6 }}>
+                    선택된 주제
+                  </div>
+                  {(!ctxCats || ctxCats.length === 0) ? (
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                      전체 주제에서 출제됩니다
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 180, overflowY: 'auto' }}>
+                      {ctxCats.map(c => (
+                        <span key={c} style={{
+                          fontSize: '0.76rem', padding: '3px 8px', borderRadius: 999,
+                          background: 'rgba(124,58,237,0.22)', border: '1px solid rgba(124,58,237,0.5)',
+                          color: 'var(--text-primary)', whiteSpace: 'nowrap'
+                        }}>{c}</span>
+                      ))}
+                    </div>
+                  )}
+                  {/* 꼬리 */}
+                  <div style={{
+                    position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+                    width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent',
+                    borderBottom: '7px solid rgba(255,255,255,0.15)'
+                  }} />
+                </div>
+              )}
+            </div>
           </div>
           {currentIsHost && (
             <div className="animate-fadeInUp" style={{ display: 'flex', gap: 10, animationDelay: '0.08s' }}>
@@ -392,6 +450,22 @@ export default function LobbyScreen() {
                     onClick={() => chooseRounds(r)}
                   >
                     {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 라운드 시간(초) */}
+            <div className="setting-row" style={{ marginBottom: 20 }}>
+              <label>라운드 시간 (정답 입력 제한, 초)</label>
+              <div className="score-selector">
+                {ROUND_TIME_OPTIONS.map(t => (
+                  <button
+                    key={t}
+                    className={`score-option ${roundTimeSel === t ? 'active' : ''}`}
+                    onClick={() => setRoundTimeSel(t)}
+                  >
+                    {t}
                   </button>
                 ))}
               </div>

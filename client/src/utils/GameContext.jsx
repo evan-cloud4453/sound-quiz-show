@@ -23,6 +23,7 @@ const initialState = {
 
   // ★ 게임 설정
   roundCount: 10,            // 라운드 수
+  roundTime: 15,             // 라운드당 정답 시간(초)
   selectedCategories: [],    // 선택한 주제 ([] = 전체)
   availableCategories: [],   // 서버가 알려주는 선택 가능한 주제 목록
 
@@ -72,6 +73,9 @@ function reducer(state, action) {
         targetScore: action.data.targetScore,
         maxPlayers: action.data.maxPlayers ?? state.maxPlayers,
         roundCount: action.data.roundCount ?? state.roundCount,
+        roundTime: action.data.roundTime ?? state.roundTime,
+        // ★ 현재 선택된 주제(전원에게 브로드캐스트) — 비방장도 볼 수 있게
+        selectedCategories: action.data.selectedCategories ?? state.selectedCategories,
         // 서버가 주제 목록을 보내주면 갱신 (없으면 기존 유지)
         availableCategories: action.data.categories?.length
           ? action.data.categories
@@ -84,6 +88,7 @@ function reducer(state, action) {
         ...state,
         targetScore: action.config.targetScore ?? state.targetScore,
         roundCount: action.config.roundCount ?? state.roundCount,
+        roundTime: action.config.roundTime ?? state.roundTime,
         selectedCategories: action.config.categories ?? state.selectedCategories
       }
 
@@ -271,6 +276,7 @@ export function GameProvider({ children }) {
     const payload = {
       targetScore: cfg.targetScore ?? 5,
       roundCount:  cfg.roundCount  ?? 10,
+      roundTime:   cfg.roundTime   ?? 15,
       categories:  cfg.categories  ?? [],
       autoSkipOpening: !!cfg.autoSkipOpening,   // ★ 재시작이면 true
       fromRematch:     !!cfg.fromRematch        // ★ 재시작이면 준비 체크 건너뜀

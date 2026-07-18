@@ -222,6 +222,7 @@ function getRoomState(room) {
     totalRounds:   room.totalRounds,
     targetScore:   room.targetScore,
     roundCount:    room.roundCount,
+    roundTime:     room.roundTime || ROUND_TIME_LIMIT,   // ★ 라운드당 정답 시간(초)
     selectedCategories: room.selectedCategories || [],
     categories:    ALL_CATEGORIES, // 설정창용 주제 목록
     isTimerRunning: !!room.roundTimer // 💡 프론트엔드 타이머 애니메이션 트리거
@@ -246,14 +247,15 @@ function startRoundTimer(room) {
   clearTimeout(room.graceTimer);
   room.graceTimer = null;
 
+  const limit = room.roundTime || ROUND_TIME_LIMIT;
   room.roundTimer = setTimeout(() => {
     room.roundTimer = null;
     endRound(room);          // 시간 초과 → 라운드 종료(정답자 순위 요약 방송)
-  }, ROUND_TIME_LIMIT * 1000);
+  }, limit * 1000);
 
-  io.to(room.code).emit('timer_start', { timeLimit: ROUND_TIME_LIMIT });
+  io.to(room.code).emit('timer_start', { timeLimit: limit });
   io.to(room.code).emit('room_update', getRoomState(room)); // 💡 타이머 시작 즉시 상태 갱신
-  console.log(`[타이머 시작] 방 ${room.code} 라운드 ${room.currentRound} — ${ROUND_TIME_LIMIT}초`);
+  console.log(`[타이머 시작] 방 ${room.code} 라운드 ${room.currentRound} — ${limit}초`);
 }
 
 // ── 소켓 이벤트 ───────────────────────────────────────────────
@@ -308,6 +310,7 @@ io.on('connection', (socket) => {
           totalRounds:          ROUND_COUNT,
           targetScore:          20,   // ★ 순위 점수제 기본 목표(10/20/30/40/50 중)
           roundCount:           ROUND_COUNT,
+          roundTime:            ROUND_TIME_LIMIT,   // ★ 라운드당 정답 시간(초), 호스트가 조정 가능
           selectedCategories:   [],
           questions:            [],
           roundTimer:           null,
@@ -403,7 +406,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('start_game', ({ targetScore = 20, roundCount = ROUND_COUNT, categories = [], autoSkipOpening = false, fromRematch = false } = {}, cb) => {
+  socket.on('start_game', ({ targetScore = 20, roundCount = ROUND_COUNT, roundTime, categories = [], autoSkipOpening = false, fromRematch = false } = {}, cb) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room)                     return cb?.({ error: '방을 찾을 수 없습니다.' });
@@ -434,6 +437,7 @@ io.on('connection', (socket) => {
       room.currentRoundBonus  = false;
       room.targetScore        = Number(targetScore) || 5;
       room.roundCount         = count;
+      if (roundTime != null) room.roundTime = Math.max(5, Math.min(60, Number(roundTime) || ROUND_TIME_LIMIT));
       room.selectedCategories = Array.isArray(categories) ? categories : [];
       room.questions          = questions;
       room.totalRounds        = questions.length;
@@ -636,7 +640,7 @@ io.on('connection', (socket) => {
 
   // ── 방 설정 실시간 공유 (방장만) ──────────────────────────────
   // 방장이 설정창에서 값을 바꾸면 즉시 방 전체에 반영 → 다른 유저도 목표점수/라운드 수 확인 가능
-  socket.on('update_settings', ({ targetScore, roundCount, categories, maxPlayers } = {}) => {
+  socket.on('update_settings', ({ targetScore, roundCount, roundTime, categories, maxPlayers } = {}) => {
     try {
       const room = rooms.get(socket.data.roomCode);
       if (!room || !isHost(room, socket.id) || room.status !== 'WAITING') return;
@@ -649,6 +653,10 @@ io.on('connection', (socket) => {
       if (roundCount != null) {
         const v = Math.max(1, Math.min(Number(roundCount) || room.roundCount, 30));
         if (v !== room.roundCount) { room.roundCount = v; changed = true; }
+      }
+      if (roundTime != null) {
+        const v = Math.max(5, Math.min(60, Number(roundTime) || room.roundTime));
+        if (v !== room.roundTime) { room.roundTime = v; changed = true; }
       }
       if (maxPlayers != null) {
         // 5~15 범위 + 현재 인원수보다 낮게는 못 내림
@@ -851,7 +859,7 @@ function startRound(room) {
     youtubeId:    question.youtubeId,
     youtubeStart: question.youtubeStart,
     youtubeEnd:   question.youtubeEnd,
-    timeLimit:    ROUND_TIME_LIMIT,
+    timeLimit:    room.roundTime || ROUND_TIME_LIMIT,
     isBonus,                              // ★ 보너스 여부
     pointValue:   isBonus ? 2 : 1         // ★ 배점
   });
