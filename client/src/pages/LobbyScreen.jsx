@@ -13,8 +13,19 @@ export default function LobbyScreen() {
   } = state
 
   // ── 설정 (방장이 모달에서 조정) ──
-  const [targetScore, setTargetScore] = useState(ctxTargetScore || 5)
+  const [targetScore, setTargetScore] = useState(ctxTargetScore || 20)
   const [roundCount, setRoundCount]   = useState(ctxRoundCount || 10)
+  const TARGET_OPTIONS = [10, 20, 30, 40, 50]
+  // 라운드당 1등 3점이 최대이므로, 라운드 수 × 3 을 넘는 목표는 도달 불가 → 선택 차단
+  const maxReachable = roundCount * 3
+  // 라운드 수가 바뀌어 현재 목표가 도달 불가가 되면, 선택 가능한 최댓값으로 낮춘다.
+  const chooseRounds = (r) => {
+    setRoundCount(r)
+    if (targetScore > r * 3) {
+      const valid = TARGET_OPTIONS.filter(s => s <= r * 3)
+      setTargetScore(valid.length ? valid[valid.length - 1] : TARGET_OPTIONS[0])
+    }
+  }
   const [selectedCats, setSelectedCats] = useState(ctxCats || [])
   const [maxPlayersInput, setMaxPlayersInput] = useState(maxPlayers || 5) // ★ 설정에서 최대 인원 조절
   const [showSettings, setShowSettings] = useState(false)
@@ -349,16 +360,25 @@ export default function LobbyScreen() {
             <div className="setting-row" style={{ marginBottom: 20 }}>
               <label>목표 점수 (먼저 달성하면 승리!)</label>
               <div className="score-selector">
-                {[3, 5, 7, 10, 15, 20].map(s => (
-                  <button
-                    key={s}
-                    className={`score-option ${targetScore === s ? 'active' : ''}`}
-                    onClick={() => setTargetScore(s)}
-                  >
-                    {s}
-                  </button>
-                ))}
+                {TARGET_OPTIONS.map(s => {
+                  const reachable = s <= maxReachable
+                  return (
+                    <button
+                      key={s}
+                      className={`score-option ${targetScore === s ? 'active' : ''}`}
+                      onClick={() => reachable && setTargetScore(s)}
+                      disabled={!reachable}
+                      title={reachable ? '' : `라운드 ${roundCount}개로는 도달 불가 (최대 ${maxReachable}점)`}
+                      style={!reachable ? { opacity: 0.3, cursor: 'not-allowed' } : undefined}
+                    >
+                      {s}
+                    </button>
+                  )
+                })}
               </div>
+              <p style={{ color: 'var(--text-dim)', fontSize: '0.74rem', marginTop: 6 }}>
+                * 1등 3점 / 2등 2점 / 3등 이하 1점. 목표는 라운드 수 × 3(현재 최대 {maxReachable}점)까지만 선택 가능.
+              </p>
             </div>
 
             {/* 라운드 수 */}
@@ -369,7 +389,7 @@ export default function LobbyScreen() {
                   <button
                     key={r}
                     className={`score-option ${roundCount === r ? 'active' : ''}`}
-                    onClick={() => setRoundCount(r)}
+                    onClick={() => chooseRounds(r)}
                   >
                     {r}
                   </button>

@@ -122,6 +122,8 @@ export default function GameScreen() {
   const [answer,        setAnswer]        = useState('')
   const [answersOpen,   setAnswersOpen]   = useState(false)   // ★ 서버가 정답 접수를 연 뒤에만 true
   const [submitted,     setSubmitted]     = useState(false)
+  const [myScored,      setMyScored]      = useState(false)   // ★ 이번 라운드에 내가 정답 처리됨(입력 잠금)
+  const [scoredMap,     setScoredMap]     = useState({})      // ★ { playerId: 순위 } 이번 라운드 정답자(부스 초록 표시)
   const [flashWrong,    setFlashWrong]    = useState(false)
   const [phaseLabel,    setPhaseLabel]    = useState('접속 대기 중...')
   const [showResult,    setShowResult]    = useState(false)
@@ -220,11 +222,21 @@ export default function GameScreen() {
       }, 2500)
     })
     return unsub
-  }, [on])
+  }, [on, myId])
 
-  // 라운드가 바뀌면 말풍선 초기화
+  // ★ 정답 처리 수신 (텍스트 없음 — 누가 맞혔는지만). 부스 초록 표시 + 본인이면 입력 잠금.
+  useEffect(() => {
+    const unsub = on('player_scored', ({ playerId, rank }) => {
+      setScoredMap(prev => ({ ...prev, [playerId]: rank }))
+      if (playerId === myId) setMyScored(true)
+    })
+    return unsub
+  }, [on, myId])
+
+  // 라운드가 바뀌면 말풍선/정답표시 초기화
   useEffect(() => {
     setBubbles({})
+    setScoredMap({})
     Object.values(bubbleTimersRef.current).forEach(clearTimeout)
     bubbleTimersRef.current = {}
   }, [currentRound])
@@ -400,7 +412,7 @@ export default function GameScreen() {
     prevAc?.abort()
     const sig = ac.signal
 
-    setAnswer(''); setSubmitted(false); setFlashWrong(false)
+    setAnswer(''); setSubmitted(false); setFlashWrong(false); setMyScored(false)
     setIsPlaying(false); setTimerActive(false); setAnswersOpen(false)
     setShowResult(false); setPlaybackError(false)
     setBonusActive(false)
@@ -507,10 +519,9 @@ export default function GameScreen() {
     }
   }, [roundActive])
 
-  // 결과 수신
+  // 라운드 종료 결과 수신 (순위 요약)
   useEffect(() => {
-    if (!lastResult) return
-    if (!lastResult.correct && !lastResult.noWinner && !lastResult.winnerId) return
+    if (!lastResult?.roundOver) return
 
     seqAbortRef.current?.abort()
     clearInterval(tickRef.current)
@@ -523,10 +534,10 @@ export default function GameScreen() {
     return () => clearTimeout(t)
   }, [lastResult])
 
-  // 개인 오답 처리 (빨간 깜빡임 — 본인 화면만)
+  // 개인 오답 처리 (빨간 깜빡임 — 본인 화면만). 라운드 종료 통지는 제외.
   useEffect(() => {
     if (!lastResult) return
-    if (lastResult.correct || lastResult.winnerId || lastResult.noWinner) return
+    if (lastResult.roundOver || lastResult.correct) return
 
     setFlashWrong(true)
     setSubmitted(false)
@@ -546,14 +557,15 @@ export default function GameScreen() {
   }, [roundActive, soundUnlocked])
 
   const handleSubmit = useCallback(() => {
-    if (!answer.trim() || submitted || !roundActive || !answersOpen) return
+    if (!answer.trim() || submitted || !roundActive || !answersOpen || myScored) return
     setSubmitted(true)
     submitAnswer(answer.trim())
-  }, [answer, submitted, roundActive, answersOpen, submitAnswer])
+  }, [answer, submitted, roundActive, answersOpen, myScored, submitAnswer])
 
   const handleKey = (e) => { if (e.key === 'Enter') handleSubmit() }
 
-  const progressPct = totalRounds > 0 ? ((currentRound - 1) / totalRounds) * 100 : 0
+  // 진행바: 현재 라운드 기준으로 채워 마지막 라운드에 100%가 되게 (currentRound/totalRounds)
+  const progressPct = totalRounds > 0 ? Math.min(100, (currentRound / totalRounds) * 100) : 0
 
   return (
     <div className={`game-screen ${flashWrong ? 'flash-wrong' : ''}`}>
@@ -672,25 +684,37 @@ export default function GameScreen() {
         </div>
       )}
 
-      {/* 결과 오버레이 */}
-      {showResult && lastResult && (
+      {/* 결과 오버레이 (라운드 종료 — 정답 공개 + 정답자 순위) */}
+      {showResult && lastResult?.roundOver && (
         <div className="result-overlay show">
-          {lastResult.winnerId && (
-            <div className="result-banner correct animate-scaleIn">
-              <div className="result-icon">🎯</div>
-              <div className="result-text">
-                <span className="result-winner">{lastResult.winnerNickname}</span>
-                <span>정답!</span>
-              </div>
-              <div className="result-answer">정답: {lastResult.answer}</div>
-            </div>
-          )}
-          {lastResult.noWinner && (
+          {lastResult.noWinner ? (
             <div className="result-banner timeout animate-scaleIn">
               <div className="result-icon">⏰</div>
-              <div className="result-text">시간 초과!</div>
-              <div className="result-answer">정답: {lastResult.answer}</div>
-              <div className="result-sub">{lastResult.message}</div>
+              <div className="result-text">아무도 못 맞혔어요</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', letterSpacing: '0.1em' }}>정답</div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 900 }} className="glow-cyan">{lastResult.answer}</div>
+            </div>
+          ) : (
+            <div className="result-banner correct animate-scaleIn">
+              {/* ★ 정답 공개(크게) */}
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', letterSpacing: '0.1em' }}>🎬 정답</div>
+              <div style={{ fontSize: '1.9rem', fontWeight: 900, marginBottom: 8 }} className="glow-cyan">{lastResult.answer}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 220 }}>
+                {(lastResult.ranking || []).map((r, i) => (
+                  <div key={i} style={{
+                    display: 'flex', justifyContent: 'space-between', gap: 14,
+                    fontSize: i === 0 ? '1.15rem' : '0.95rem',
+                    fontWeight: i === 0 ? 800 : 600,
+                    color: i === 0 ? 'var(--green-glow)' : 'var(--text-primary)'
+                  }}>
+                    <span>{['🥇','🥈','🥉'][i] || `${i + 1}위`} {r.nickname}</span>
+                    <span>+{r.points}점</span>
+                  </div>
+                ))}
+              </div>
+              {lastResult.isBonus && (
+                <div className="result-sub" style={{ marginTop: 6 }}>💫 보너스 라운드 — 점수 2배!</div>
+              )}
             </div>
           )}
         </div>
@@ -775,6 +799,20 @@ export default function GameScreen() {
         {/* 정답 입력 */}
         <div className={`answer-area glass-panel ${roundActive?'active':''}`}>
           {roundActive ? (
+            myScored ? (
+              <div className="waiting-next" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{
+                  background: 'linear-gradient(135deg,#34d399,#22c55e)', color: '#052e16',
+                  fontWeight: 800, fontSize: '0.92rem', padding: '5px 14px', borderRadius: 999,
+                  boxShadow: '0 0 14px rgba(34,197,94,0.5)'
+                }}>
+                  정답{scoredMap[myId] ? ` · ${scoredMap[myId]}등` : ''}
+                </span>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                  다른 참가자를 기다리는 중…
+                </span>
+              </div>
+            ) : (
             <>
               <div className="answer-row">
                 <input
@@ -800,6 +838,7 @@ export default function GameScreen() {
               {submitted && !flashWrong && <p className="submitted-hint">판정 중...</p>}
               {flashWrong && <p className="wrong-hint">❌ 틀렸습니다! 다시 시도하세요.</p>}
             </>
+            )
           ) : (
             <p className="waiting-next">다음 라운드 준비 중...</p>
           )}
@@ -809,7 +848,9 @@ export default function GameScreen() {
         <div className="player-booths" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginTop: 4 }}>
           {players.map(p => {
             const isMe     = p.id === myId || p.nickname === nickname
-            const isWinner = lastResult?.winnerId === p.id
+            const isWinner = lastResult?.roundOver && lastResult?.ranking?.[0]?.nickname === p.nickname
+            const scored   = scoredMap[p.id]                 // 이번 라운드 정답 순위(있으면 맞힌 것)
+            const hot      = isWinner || scored != null      // 초록 강조 여부
             const bubble   = bubbles[p.id]
             return (
               <div
@@ -850,17 +891,31 @@ export default function GameScreen() {
                   </div>
                 )}
 
+                {/* ★ 정답 처리 배지 (텍스트 없이 순위만 — 따라치기 방지) */}
+                {scored != null && (
+                  <div style={{
+                    position: 'absolute', top: -8, right: -6, zIndex: 25,
+                    background: 'linear-gradient(135deg,#34d399,#22c55e)', color: '#052e16',
+                    fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: 999,
+                    boxShadow: '0 0 12px rgba(34,197,94,0.6)'
+                  }}>
+                    {scored}등
+                  </div>
+                )}
+
                 {/* 카드 */}
                 <div style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
                   minHeight: 118, height: '100%',
                   padding: '14px 8px', borderRadius: 14,
-                  background: isMe ? 'rgba(124,58,237,0.18)' : 'rgba(255,255,255,0.05)',
-                  border: isWinner
+                  background: hot
+                    ? 'rgba(34,197,94,0.18)'
+                    : (isMe ? 'rgba(124,58,237,0.18)' : 'rgba(255,255,255,0.05)'),
+                  border: hot
                     ? '1.5px solid #22c55e'
                     : (isMe ? '1px solid rgba(124,58,237,0.6)' : '1px solid rgba(255,255,255,0.10)'),
-                  boxShadow: isWinner ? '0 0 16px rgba(34,197,94,0.5)' : 'none',
-                  transition: 'border 0.2s, box-shadow 0.2s',
+                  boxShadow: hot ? '0 0 16px rgba(34,197,94,0.5)' : 'none',
+                  transition: 'background 0.2s, border 0.2s, box-shadow 0.2s',
                   opacity: p.disconnected ? 0.5 : 1
                 }}>
                   <div style={{ fontSize: '1.6rem', lineHeight: 1 }}>{p.avatar || getAvatar(p.id)}</div>
