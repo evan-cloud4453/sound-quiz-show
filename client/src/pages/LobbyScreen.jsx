@@ -33,7 +33,21 @@ export default function LobbyScreen() {
   const [maxPlayersInput, setMaxPlayersInput] = useState(maxPlayers || 5) // ★ 설정에서 최대 인원 조절
   const [showSettings, setShowSettings] = useState(false)
   const [showCatPop, setShowCatPop] = useState(false)   // ★ 주제 팝오버(hover/tap)
+  const [catPopPos, setCatPopPos] = useState({ top: 0, left: 0 })
   const catPopTimer = useRef(null)
+  const catChipRef = useRef(null)
+
+  // 팝오버를 트리거 칩 위치 기준으로 fixed 로 띄운다(부모 overflow/쌓임에 안 가리게).
+  const openCatPop = (autoHide) => {
+    const el = catChipRef.current
+    if (el) {
+      const r = el.getBoundingClientRect()
+      setCatPopPos({ top: r.bottom + 8, left: r.left + r.width / 2 })
+    }
+    setShowCatPop(true)
+    clearTimeout(catPopTimer.current)
+    if (autoHide) catPopTimer.current = setTimeout(() => setShowCatPop(false), 2800)
+  }
 
   // 설정창을 열 때 현재 방 값 반영 (다른 값으로 갱신됐을 수 있으므로)
   useEffect(() => {
@@ -158,24 +172,20 @@ export default function LobbyScreen() {
 
             {/* 주제 칩 + 팝오버 (전원 표시): 데스크톱 hover / 모바일 tap 시 선택된 주제 목록 표시 */}
             <div
-              style={{ position: 'relative' }}
-              onMouseEnter={() => setShowCatPop(true)}
+              ref={catChipRef}
+              onMouseEnter={() => openCatPop(false)}
               onMouseLeave={() => setShowCatPop(false)}
-              onClick={() => {
-                setShowCatPop(true)
-                clearTimeout(catPopTimer.current)
-                catPopTimer.current = setTimeout(() => setShowCatPop(false), 2800)
-              }}
+              onClick={() => openCatPop(true)}
             >
               <div className="info-chip" style={{ cursor: 'pointer' }}>
-                🎵 {(ctxCats && ctxCats.length) ? `${ctxCats.length}개 주제` : '전체 주제'} ⌄
+                🎵 {(ctxCats && ctxCats.length) ? `${ctxCats.length}개 주제` : '전체 주제'}
               </div>
               {showCatPop && (
                 <div style={{
-                  position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)',
-                  zIndex: 60, width: 'max-content', maxWidth: 280,
-                  background: 'rgba(10,12,24,0.97)', border: '1px solid rgba(255,255,255,0.15)',
-                  borderRadius: 12, padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+                  position: 'fixed', top: catPopPos.top, left: catPopPos.left, transform: 'translateX(-50%)',
+                  zIndex: 9999, width: 'max-content', maxWidth: 'min(280px, 90vw)',
+                  background: 'rgba(10,12,24,0.98)', border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: 12, padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.55)'
                 }}>
                   <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 6 }}>
                     선택된 주제
@@ -195,12 +205,6 @@ export default function LobbyScreen() {
                       ))}
                     </div>
                   )}
-                  {/* 꼬리 */}
-                  <div style={{
-                    position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
-                    width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent',
-                    borderBottom: '7px solid rgba(255,255,255,0.15)'
-                  }} />
                 </div>
               )}
             </div>
