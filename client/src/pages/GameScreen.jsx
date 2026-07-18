@@ -799,9 +799,18 @@ export default function GameScreen() {
         <div className={`answer-area glass-panel ${roundActive?'active':''}`}>
           {roundActive ? (
             myScored ? (
-              <p className="waiting-next" style={{ color: 'var(--green-glow)', fontWeight: 700 }}>
-                ✅ 정답! 다른 참가자들을 기다리는 중...
-              </p>
+              <div className="waiting-next" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{
+                  background: 'linear-gradient(135deg,#34d399,#22c55e)', color: '#052e16',
+                  fontWeight: 800, fontSize: '0.92rem', padding: '5px 14px', borderRadius: 999,
+                  boxShadow: '0 0 14px rgba(34,197,94,0.5)'
+                }}>
+                  정답{scoredMap[myId] ? ` · ${scoredMap[myId]}등` : ''}
+                </span>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                  다른 참가자를 기다리는 중…
+                </span>
+              </div>
             ) : (
             <>
               <div className="answer-row">
