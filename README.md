@@ -628,7 +628,7 @@ sound-quiz-show/
 
 ---
 
-<div align="center">
+<div align="left">
 <sub>
 
 **Sound Catch** · 기획 · 개발 · 데이터 구축 — [Gio Kim](https://github.com/evan-cloud4453)
