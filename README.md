@@ -1,4 +1,4 @@
-<div align="center">
+<div align="left">
 
 # 🎵 Sound Catch · 사운드 캐치
 
