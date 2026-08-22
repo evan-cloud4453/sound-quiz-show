@@ -5,6 +5,7 @@ import LobbyScreen from './pages/LobbyScreen'
 import GameScreen from './pages/GameScreen'
 import GameOverScreen from './pages/GameOverScreen'
 import SystemToast from './components/SystemToast'
+import Copyright from './components/Copyright'
 
 // ★ 서버 연결 끊김 / 세션 종료 오버레이
 function ConnectionLostOverlay() {
@@ -59,6 +60,9 @@ function Router() {
 
       {/* ★ 연결 끊김 오버레이 (최상단) */}
       <ConnectionLostOverlay />
+
+      {/* 저작권 표시 (PC 우하단 / 모바일 하단 중앙) */}
+      <Copyright />
     </>
   )
 }

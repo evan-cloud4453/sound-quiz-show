@@ -1,0 +1,35 @@
+# ── 의존성 ──────────────────────────────────────────────
+node_modules/
+
+# ── 빌드 산출물 ─────────────────────────────────────────
+dist/
+build/
+.vercel/
+
+# ── 환경 변수 ───────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── quiz_validator.py 부산물 ────────────────────────────
+# 도구 본체(server/quiz_validator.py)는 저장소에 포함하고,
+# 실행하면서 생기는 백업·검사 캐시만 제외한다.
+*.bak
+*.bak.last
+*.check.json
+__pycache__/
+*.py[cod]
+
+# ── 로그 ────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ── 에디터 · OS ─────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

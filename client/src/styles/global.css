@@ -411,3 +411,34 @@ body {
   .btn-lg { padding: 14px 28px; font-size: 1rem; }
   .input  { font-size: 0.95rem; }
 }
+
+/* ─── 저작권 표시 (전 화면 공통) ─────────────────────────────── */
+/* PC: 우하단 / 모바일: 하단 중앙. 게임 조작을 막지 않도록 pointer-events 해제. */
+.copyright-badge {
+  position: fixed;
+  right: 14px;
+  bottom: 10px;
+  z-index: 400;
+  font-family: var(--font-body);
+  font-size: 0.68rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--text-dim);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (max-width: 768px) {
+  .copyright-badge {
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    font-size: 0.6rem;
+  }
+
+  /* 하단 중앙 표시가 마지막 콘텐츠 위에 겹치지 않도록 전용 여백 확보 */
+  #root { padding-bottom: 22px; }
+}

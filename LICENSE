@@ -1,0 +1,106 @@
+Copyright (c) 2026 Gio Kim. All Rights Reserved.
+
+Sound Catch (사운드 캐치)
+https://github.com/evan-cloud4453/sound-quiz-show
+
+
+PROPRIETARY LICENSE / 사용 제한 고지
+====================================
+
+This repository is published for PORTFOLIO AND PERSONAL REFERENCE PURPOSES ONLY.
+No open source license is granted. All rights are reserved by the copyright holder.
+
+이 저장소는 포트폴리오 공개 및 열람 목적으로만 게시되었습니다.
+오픈소스 라이선스가 부여된 것이 아니며, 모든 권리는 저작권자에게 유보됩니다.
+
+
+1. RESERVED RIGHTS / 유보되는 권리
+-----------------------------------
+
+The copyright holder retains full and exclusive rights to all creative and
+technical work contained in this repository, including but not limited to:
+
+  (a) Game concept and design — the sound-quiz-show format, show progression,
+      and screen composition
+  (b) Game rules and system design — the rank-based scoring system, bonus round
+      mechanics, ready-gate flow, and reconnection grace rules
+  (c) The COMPILATION AND EDITORIAL ARRANGEMENT of the quiz database — the
+      category taxonomy, question selection, playback range selection,
+      answer and alias lists, and hint text
+  (d) All source code, UI/UX design, and the narration/category audio structure
+
+이 저장소에 포함된 게임 기획, 게임 규칙 및 시스템 설계, 퀴즈 데이터베이스의
+구성과 편집(주제 분류 체계, 문항 선정, 재생 구간 선정, 정답·별칭 목록, 힌트 문안),
+소스 코드 전체, UI/UX 디자인, 안내 음성 구성에 대한 모든 저작권은 저작권자에게
+전적으로 유보됩니다.
+
+
+2. PROHIBITED WITHOUT WRITTEN PERMISSION / 서면 허락 없이 금지되는 행위
+-----------------------------------------------------------------------
+
+  - Copying, redistributing, or creating derivative works from the source code
+    or the quiz data
+  - Commercial use of any kind (operating a service, ad monetization,
+    paid distribution, etc.)
+  - Reproducing the game concept, rules, or data arrangement as a separate
+    product or service
+
+  - 소스 코드 및 퀴즈 데이터의 복제, 재배포, 2차적 저작물 작성
+  - 일체의 상업적 이용 (서비스 운영, 광고 수익화, 유료 배포 등)
+  - 게임 기획, 규칙, 데이터 구성을 그대로 가져다 별도의 제품·서비스로 만드는 행위
+
+
+3. PERMITTED / 허용되는 행위
+-----------------------------
+
+Viewing and studying the source code for learning or research purposes is
+freely permitted. Attribution is appreciated when citing this work.
+
+학습 및 연구 목적의 열람과 참고는 자유롭게 허용됩니다.
+인용 시 출처를 밝혀 주시면 감사하겠습니다.
+
+
+4. THIRD-PARTY CONTENT / 제3자 콘텐츠
+--------------------------------------
+
+The audio played by quiz questions is NEITHER OWNED NOR DISTRIBUTED by this
+repository.
+
+  - All sounds are streamed directly from YouTube via the YouTube IFrame Player
+    API. This repository stores only video IDs and playback ranges (start/end
+    seconds). NO audio files from third-party content are included.
+  - Copyright in the streamed videos belongs to their respective rights holders
+    and YouTube uploaders. Playback is subject to YouTube's Terms of Service and
+    embedding policies.
+  - This project is a NON-COMMERCIAL personal work with no advertising,
+    payments, or monetization of any kind.
+  - Rights holders may request removal of any specific video; the corresponding
+    question will be deleted immediately upon request via GitHub Issues.
+
+퀴즈 문항이 재생하는 음원은 이 저장소가 보유하거나 배포하는 것이 아니며,
+YouTube IFrame Player API를 통해 원본 그대로 스트리밍됩니다. 저장소에는 영상 ID와
+재생 구간만 기록되어 있고 음원 파일은 포함되어 있지 않습니다. 재생되는 영상의
+저작권은 각 저작권자 및 YouTube 게시자에게 있으며, 재생은 YouTube 서비스 약관과
+임베드 정책을 따릅니다. 이 프로젝트는 광고·과금·수익화가 없는 비영리 개인
+프로젝트입니다. 저작권자의 요청이 있을 경우 해당 문항을 즉시 삭제합니다.
+
+Audio files under client/public/sounds/ (opening narration, bonus narration, and
+the 28 category announcement voices) were produced for this project and are
+covered by the reserved rights in Section 1.
+
+client/public/sounds/ 의 오디오(오프닝 나레이션, 보너스 나레이션, 주제 안내 음성
+28종)는 이 프로젝트를 위해 제작된 것으로 제1조의 유보 권리 적용을 받습니다.
+
+
+5. NO WARRANTY / 무보증
+------------------------
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+For permission requests, please open an issue at:
+https://github.com/evan-cloud4453/sound-quiz-show/issues
