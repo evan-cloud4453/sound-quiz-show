@@ -1,6 +1,6 @@
 <div align="left">
 
-# 🎵 Sound Catch · 사운드 캐치
+# Sound Catch · 사운드 캐치
 
 **들려주는 소리의 정체를 먼저 맞히는 사람이 이기는 실시간 멀티플레이 사운드 퀴즈쇼**
 
